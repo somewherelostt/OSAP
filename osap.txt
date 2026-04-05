@@ -6,7 +6,7 @@ Stop switching apps. Start managing your entire digital life from a single scree
 
 ### **The Vision: Your Life in One Screen**
 
-OSAP (Open Stateful AI Platform) is a command center that puts your entire digital workflow—Gmail, Slack, GitHub, Linear—into a single, mobile-optimized interace. 
+OSAP (Open Stateful AI Platform) is a command center that puts your entire digital workflow—Gmail, Slack, GitHub, Linear—into a single, mobile-optimized interface. 
 
 Imagine saying:
 - *"Fetch my 2 last Gmails and reply to them in my usual tone."*
@@ -43,7 +43,7 @@ Intelligence is cheap, but **State** is valuable.
 
 ### **Traction & Milestones**
 
-- **Live Integrations**: Successfully managing real workflows across Gmail, Slack, and GitHub.
+- **Live Integrations**: Successfully managing real-world tasks across Gmail, Slack, and GitHub.
 - **Stateful Logic**: Deep HydraDB integration for personal voice mirroring.
 - **Community Recognition**: Winner of Base Batches, Incubase Graduate.
 

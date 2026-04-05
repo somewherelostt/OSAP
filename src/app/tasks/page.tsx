@@ -168,6 +168,51 @@ export default function TasksPage() {
     );
   };
 
+  const formatTaskResult = (result: string | null | undefined) => {
+    if (!result) return null;
+    
+    // If it's not a JSON-like string, just return it
+    if (!result.trim().startsWith('{') && !result.trim().startsWith('[')) {
+      return <span className="text-xs text-muted-foreground">{result}</span>;
+    }
+
+    try {
+      const parsed = JSON.parse(result);
+      
+      // Handle Gmail list results
+      if (parsed.messages && Array.isArray(parsed.messages)) {
+        return (
+          <div className="space-y-2 mt-1">
+            {parsed.messages.slice(0, 3).map((msg: any, i: number) => {
+              const from = msg.sender || msg.from || 'Unknown';
+              const subject = msg.subject || '(No Subject)';
+              return (
+                <div key={i} className="text-[11px] bg-muted/30 p-2 rounded-lg border border-border/50">
+                  <div className="font-semibold text-foreground truncate">{from}</div>
+                  <div className="text-muted-foreground truncate">{subject}</div>
+                </div>
+              );
+            })}
+            {parsed.messages.length > 3 && (
+              <div className="text-[10px] text-muted-foreground px-1">
+                + {parsed.messages.length - 3} more messages
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // Default JSON formatting
+      return (
+        <pre className="text-[10px] font-mono text-muted-foreground bg-muted/20 p-2 rounded-lg overflow-auto max-h-40">
+          {JSON.stringify(parsed, null, 2)}
+        </pre>
+      );
+    } catch {
+      return <span className="text-xs text-muted-foreground">{result}</span>;
+    }
+  };
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-6">
       {/* Header */}
@@ -323,9 +368,11 @@ export default function TasksPage() {
 
                       {/* Answer/Result inside card */}
                       {answer && (
-                        <div className="flex items-start gap-2 pl-3 border-l-2 border-muted">
+                        <div className="flex items-start gap-2 pl-3 border-l-2 border-muted overflow-hidden">
                           <ArrowRight className="size-3 text-muted-foreground mt-1 shrink-0" />
-                          <span className="text-xs text-muted-foreground">{answer}</span>
+                          <div className="flex-1 min-w-0">
+                            {formatTaskResult(answer)}
+                          </div>
                         </div>
                       )}
 
