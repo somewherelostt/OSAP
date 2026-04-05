@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useUser } from '@clerk/nextjs';
 import { useSearchParams } from 'next/navigation';
 import { CommandInput } from '@/components/command-input';
@@ -53,7 +53,7 @@ const quickActions = [
   { id: '2', label: 'Search Memory', icon: <Brain className="size-3" />, action: 'search_memory' },
 ];
 
-export default function HomePage() {
+function HomeContent() {
   const searchParams = useSearchParams();
   const initialQuery = searchParams.get('q') || searchParams.get('query') || '';
   
@@ -381,5 +381,17 @@ export default function HomePage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      </div>
+    }>
+      <HomeContent />
+    </Suspense>
   );
 }
