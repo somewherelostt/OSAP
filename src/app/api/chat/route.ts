@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { getOrCreateClerkUser } from '@/lib/database';
+import { getComposioTools } from '@/lib/composio';
 
 const GLM_API_URL = process.env.GLM_API_URL || 'https://api.z.ai/api/coding/paas/v4/chat/completions';
 const GLM_API_KEY = process.env.GLM_API_KEY;
-const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY;
 
 interface ChatTask {
   id: string;
@@ -25,7 +25,6 @@ interface InMemoryMemory {
 const inMemoryTasks: Map<string, ChatTask[]> = new Map();
 const inMemoryMemories: Map<string, InMemoryMemory[]> = new Map();
 
-// In-memory memory store (fallback when HydraDB unavailable)
 function storeInMemory(userId: string, content: string, type = 'fact') {
   const memories = inMemoryMemories.get(userId) || [];
   memories.unshift({
@@ -49,58 +48,6 @@ function recallInMemory(userId: string, query: string): string {
   return relevant.slice(0, 5).map(m => m.content).join('\n');
 }
 
-// Get available Composio tools
-async function getComposioTools() {
-  if (!COMPOSIO_API_KEY) return [];
-  
-  try {
-    const { Composio } = await import('composio-core');
-    const client = new Composio({ apiKey: COMPOSIO_API_KEY });
-    
-    const apps = await (client as any).apps.list({});
-    const tools = [];
-    
-    for (const app of apps.slice(0, 5)) {
-      try {
-        const actions = await (client as any).actions.list({ appId: app.name });
-        if (actions && actions.length > 0) {
-          tools.push(...actions.slice(0, 3).map((a: any) => ({
-            name: a.name,
-            description: a.description || `Use ${app.name} ${a.name}`,
-            app: app.name,
-          })));
-        }
-      } catch {}
-    }
-    
-    return tools.slice(0, 20);
-  } catch (error) {
-    console.error('[Composio] Failed to fetch tools:', error);
-    return [];
-  }
-}
-
-// Execute Composio tool
-async function executeTool(toolName: string, input: Record<string, unknown>) {
-  if (!COMPOSIO_API_KEY) {
-    return { success: false, error: 'Composio not configured' };
-  }
-  
-  try {
-    const { Composio } = await import('composio-core');
-    const client = new Composio({ apiKey: COMPOSIO_API_KEY });
-    
-    const result = await (client as any).tools.execute({
-      action: toolName,
-      input,
-    });
-    
-    return { success: true, data: result };
-  } catch (error) {
-    return { success: false, error: String(error) };
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     const { userId: clerkUserId } = await auth();
@@ -120,7 +67,6 @@ export async function POST(request: NextRequest) {
     const taskId = `task_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const effectiveUserId = dbUser.id;
 
-    // Check for memory commands
     const isMemoryStore = input.toLowerCase().startsWith('remember') || 
                          input.toLowerCase().startsWith('store') ||
                          input.toLowerCase().startsWith('save');
@@ -128,7 +74,6 @@ export async function POST(request: NextRequest) {
                           input.toLowerCase().startsWith('what do i') ||
                           input.toLowerCase().startsWith('do you remember');
 
-    // Handle memory storage
     if (isMemoryStore) {
       const memoryText = input.replace(/^(remember|store|save)\s+/i, '').trim();
       storeInMemory(effectiveUserId, memoryText, 'fact');
@@ -140,7 +85,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Handle memory recall
     if (isMemoryRecall) {
       const query = input.replace(/^(recall|what do i|do you remember)\s+/i, '').trim();
       const memories = recallInMemory(effectiveUserId, query);
@@ -152,16 +96,19 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Get context from memories
     const memoryContext = recallInMemory(effectiveUserId, input);
 
-    // Get Composio tools
-    const composioTools = await getComposioTools();
-    const toolDescriptions = composioTools.length > 0 
-      ? `\n\nAvailable tools you can use:\n${composioTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}`
+    let composioToolsList: Array<{ name: string; description: string }> = [];
+    try {
+      composioToolsList = await getComposioTools(effectiveUserId);
+    } catch (e) {
+      console.warn('[Chat] Composio tools fetch failed:', e);
+    }
+
+    const toolDescriptions = composioToolsList.length > 0 
+      ? `\n\nAvailable tools you can use:\n${composioToolsList.slice(0, 10).map(t => `- ${t.name}: ${t.description}`).join('\n')}`
       : '';
 
-    // Build messages
     const systemPrompt = `You are OSAP, a helpful AI assistant with access to tools.
 ${memoryContext ? `Relevant memories from user:\n${memoryContext}\n` : ''}
 When user asks to remember/store/save something, acknowledge and confirm.
@@ -174,7 +121,6 @@ Respond directly and concisely.`;
       { role: 'user', content: input },
     ];
 
-    // Call GLM API
     const response = await fetch(GLM_API_URL, {
       method: 'POST',
       headers: {
@@ -189,21 +135,19 @@ Respond directly and concisely.`;
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
       return NextResponse.json({ error: `GLM error: ${response.status}` }, { status: 500 });
     }
 
     const data = await response.json();
     const reply = data.choices?.[0]?.message?.content || 'No response';
 
-    // Add task to in-memory storage
     const userTasks = inMemoryTasks.get(effectiveUserId) || [];
     userTasks.unshift({
       id: taskId,
       input,
       reply,
       status: 'success',
-      toolsUsed: composioTools.length > 0 ? composioTools.map((t: any) => t.name) : [],
+      toolsUsed: composioToolsList.map(t => t.name),
       createdAt: new Date(),
     });
     inMemoryTasks.set(effectiveUserId, userTasks.slice(0, 20));
@@ -212,7 +156,7 @@ Respond directly and concisely.`;
       reply, 
       taskId, 
       tasks: inMemoryTasks.get(effectiveUserId) || [],
-      toolsAvailable: composioTools.length,
+      toolsAvailable: composioToolsList.length,
     });
   } catch (error) {
     console.error('[API] Chat error:', error);
