@@ -2,67 +2,28 @@
 
 **Open Stateful AI Platform** — A browser-based AI agent development environment with persistent memory, external knowledge ingestion, autonomous execution, and built-in developer tools.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+## What can OSAP agents do?
 
-## Why OSAP?
+### Example 1: Your agent learns your coding style
 
-Unlike traditional AI assistants that forget everything after each conversation, OSAP agents maintain persistent memory across sessions. They learn from your patterns, remember your preferences, and can ingest external knowledge to become truly intelligent assistants.
+You spend an hour explaining your preferred coding patterns to your OSAP agent — naming conventions, how you structure components, your testing preferences. The next day, when you ask the agent to generate a new React component, it already knows you use TypeScript strict mode, prefer compound components, and always write tests alongside features. You don't repeat yourself. It just works.
 
-## Quick Examples
+### Example 2: Your agent reads the documentation so you don't have to
 
-### 1. Memory That Persists
+You're building integration with a new API. Instead of reading 50 pages of docs, you paste the URL into OSAP. Your agent scrapes the documentation, stores it in its memory, and now answers your questions about the API from actual documentation — not guesswork. "How do I handle pagination?" It recalls the exact section. You save hours of reading.
 
-```typescript
-// Store a preference
-await storeMemory({
-  type: "preference",
-  content: "Always use TypeScript with strict mode",
-  userId: "user_123"
-});
+### Example 3: Your agent handles repetitive tasks while you sleep
 
-// Agent recalls this in future sessions
-const context = await recallMemories("TypeScript project setup");
-// → "User prefers TypeScript with strict mode..."
-```
-
-### 2. Knowledge Ingestion
-
-```typescript
-// Scrape documentation and make it searchable
-const knowledge = await scrapeAndPrepareForIngestion("https://docs.example.com/api");
-await storeKnowledge({ ...knowledge, userId: "user_123" });
-
-// Later, agent searches this knowledge
-const results = await recallKnowledge("authentication flow");
-// → Finds relevant sections from the scraped docs
-```
-
-### 3. Autonomous Agent Execution
-
-```typescript
-// Create an agent with self-correction
-const agent = orchestrator.createAgent({
-  name: "Code Review Agent",
-  capabilities: ["reasoning", "planning", "execution"],
-  selfCorrect: true
-});
-
-// Execute complex tasks with memory context
-const plan = await orchestrator.plan(agent.id, {
-  userId: "user_123",
-  input: "Review all open PRs and summarize the changes"
-});
-
-// Agent thinks, plans, executes, and learns from outcomes
-```
+Every Monday morning, you used to spend 20 minutes checking which GitHub issues moved, which PRs need review, and what tickets are blocking the team. Now your OSAP agent runs on a schedule — automatically gathers updates, summarizes the status, and posts a report to your Slack. You start Monday knowing what's important, not spending time hunting for it.
 
 ## Features
 
-- **Persistent Memory** — Semantic memory storage with HydraDB, recall past interactions instantly
-- **Knowledge Ingestion** — Scrape websites and documents, search through them with natural language
-- **Autonomous Execution** — Agents that plan, execute, and self-correct without constant guidance
-- **Developer Environment** — Built-in Monaco editor, terminal, API client, and Git panel
-- **Trigger Automation** — Time-based and event-based automations for repetitive tasks
+- **Persistent Memory** — Agents remember your preferences, patterns, and context across sessions
+- **Knowledge Ingestion** — Feed documentation, articles, or any URL into your agent's memory
+- **Autonomous Execution** — Agents that complete multi-step tasks on their own
+- **Self-Correction** — Agents learn from failures and improve over time
+- **Developer Tools** — Built-in code editor, terminal, API client, and Git panel
+- **Trigger Automation** — Schedule tasks or set up event-driven workflows
 
 ## Tech Stack
 
@@ -113,25 +74,6 @@ NEXT_PUBLIC_HYDRA_DB_TENANT_ID=
 NEXT_PUBLIC_FIRECRAWL_API_KEY=
 ```
 
-## Architecture
-
-```
-User Input
-    ↓
-AgentOrchestrator
-    ├── think() — Reasoning with context
-    ├── plan() — Generate execution steps
-    ├── execute() — Run steps
-    └── self-correct() — Handle failures
-    ↓
-SelfCorrectionEngine — Retry strategies, learned rules
-BackgroundTaskManager — Async workflows, progress tracking
-TriggerSystem — Time-based & event-based automation
-MemoryFeedbackLoop — Learn from outcomes, pattern recognition
-    ↓
-HydraDB — Semantic memory & knowledge storage
-```
-
 ## Routes
 
 | Path | Description |
@@ -140,7 +82,7 @@ HydraDB — Semantic memory & knowledge storage
 | `/home` | Dashboard with quick actions |
 | `/tasks` | Task management |
 | `/memory` | Memory timeline |
-| `/dev` | Developer tools (editor, terminal, API client, Git) |
+| `/dev` | Developer tools |
 | `/agent` | Autonomous agent control panel |
 | `/profile` | User settings |
 
