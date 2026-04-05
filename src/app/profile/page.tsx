@@ -50,8 +50,8 @@ interface RecentTask {
 }
 
 interface EmailPreferences {
-  taskCompletionEmails: boolean;
-  memoryDigestEmails: boolean;
+  taskEmails: boolean;
+  memoryDigest: boolean;
   weeklySummary: boolean;
 }
 
@@ -123,15 +123,16 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [emailPrefs, setEmailPrefs] = useState<EmailPreferences>({
-    taskCompletionEmails: true,
-    memoryDigestEmails: true,
+    taskEmails: false,
+    memoryDigest: false,
     weeklySummary: false,
   });
   const [emailPrefsLoading, setEmailPrefsLoading] = useState(false);
+  const [emailPrefsError, setEmailPrefsError] = useState(false);
   const [accentColor, setAccentColor] = useState<string>('#8b5cf6');
-  const [connectedApps, setConnectedApps] = useState<{ connected: string[]; available: string[] }>({ connected: [], available: [] });
-  const [appsLoading, setAppsLoading] = useState(false);
-  const [connectingApp, setConnectingApp] = useState<string | null>(null);
+  const [connectedToolkits, setConnectedToolkits] = useState<{ connected: string[]; available: string[] }>({ connected: [], available: [] });
+  const [toolkitsLoading, setToolkitsLoading] = useState(false);
+  const [connectingToolkit, setConnectingToolkit] = useState<string | null>(null);
 
   const fetchStats = useCallback(async () => {
     if (!user?.id) return;
@@ -174,40 +175,48 @@ export default function ProfilePage() {
   const fetchEmailPreferences = useCallback(async () => {
     try {
       const res = await fetch('/api/profile/preferences');
-      if (!res.ok) return;
+      if (!res.ok) throw new Error('Failed to fetch preferences');
       const data = await res.json();
       setEmailPrefs(data.preferences);
+      setEmailPrefsError(false);
     } catch (error) {
       console.error('[Profile] Error fetching preferences:', error);
+      setEmailPrefsError(true);
+      // Silently fall back to default values
+      setEmailPrefs({
+        taskEmails: false,
+        memoryDigest: false,
+        weeklySummary: false,
+      });
     }
   }, []);
 
-  const fetchConnectedApps = useCallback(async () => {
+  const fetchConnectedToolkits = useCallback(async () => {
     try {
       const res = await fetch('/api/composio/status');
       if (!res.ok) return;
       const data = await res.json();
-      setConnectedApps({ connected: data.connected || [], available: data.available || [] });
+      setConnectedToolkits({ connected: data.connected || [], available: data.available || [] });
     } catch (error) {
-      console.error('[Profile] Error fetching connected apps:', error);
+      console.error('[Profile] Error fetching connected toolkits:', error);
     }
   }, []);
 
   useEffect(() => {
     if (isLoaded && user?.id) {
-      Promise.all([fetchStats(), fetchEmailPreferences(), fetchConnectedApps()]).finally(() => setLoading(false));
+      Promise.all([fetchStats(), fetchEmailPreferences(), fetchConnectedToolkits()]).finally(() => setLoading(false));
     }
-  }, [isLoaded, user?.id, fetchStats, fetchEmailPreferences, fetchConnectedApps]);
+  }, [isLoaded, user?.id, fetchStats, fetchEmailPreferences, fetchConnectedToolkits]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'COMPOSIO_CONNECTED') {
-        fetchConnectedApps();
+        fetchConnectedToolkits();
       }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [fetchConnectedApps]);
+  }, [fetchConnectedToolkits]);
 
   useEffect(() => {
     const saved = localStorage.getItem('osap-accent-color');
@@ -222,18 +231,19 @@ export default function ProfilePage() {
   };
 
   const handleEmailPrefToggle = async (key: keyof EmailPreferences, value: boolean) => {
-    const updated = { ...emailPrefs, [key]: value };
-    setEmailPrefs(updated);
+    const previousPrefs = { ...emailPrefs };
+    setEmailPrefs(prev => ({ ...prev, [key]: value }));
     setEmailPrefsLoading(true);
     try {
-      await fetch('/api/profile/preferences', {
+      const res = await fetch('/api/profile/preferences', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferenceKey: key, value }),
+        body: JSON.stringify({ key, value }),
       });
+      if (!res.ok) throw new Error('Update failed');
     } catch (error) {
       console.error('[Profile] Error updating preference:', error);
-      setEmailPrefs(emailPrefs);
+      setEmailPrefs(previousPrefs);
     } finally {
       setEmailPrefsLoading(false);
     }
@@ -250,29 +260,29 @@ export default function ProfilePage() {
     router.push('/');
   };
 
-  const handleConnectApp = async (toolkit: string) => {
-    setConnectingApp(toolkit);
+  const handleConnectToolkit = async (toolkit: string) => {
+    setConnectingToolkit(toolkit);
     try {
       const res = await fetch(`/api/composio/connect?toolkit=${toolkit}`);
       if (!res.ok) throw new Error('Failed to get auth URL');
       const data = await res.json();
       if (data.authUrl) {
         window.open(data.authUrl, '_blank', 'width=600,height=700');
-        setTimeout(() => fetchConnectedApps(), 5000);
+        setTimeout(() => fetchConnectedToolkits(), 5000);
       }
     } catch (error) {
-      console.error('[Profile] Error connecting app:', error);
+      console.error('[Profile] Error connecting toolkit:', error);
     } finally {
-      setConnectingApp(null);
+      setConnectingToolkit(null);
     }
   };
 
-  const handleDisconnectApp = async (toolkit: string) => {
+  const handleDisconnectToolkit = async (toolkit: string) => {
     try {
       await fetch(`/api/composio/connect?toolkit=${toolkit}`, { method: 'DELETE' });
-      fetchConnectedApps();
+      fetchConnectedToolkits();
     } catch (error) {
-      console.error('[Profile] Error disconnecting app:', error);
+      console.error('[Profile] Error disconnecting toolkit:', error);
     }
   };
 
@@ -381,8 +391,8 @@ export default function ProfilePage() {
         </Card>
       </div>
 
-      <div id="connected-apps" className="space-y-3">
-        <SectionHeader title="Connected Apps" />
+      <div id="connected-toolkits" className="space-y-3">
+        <SectionHeader title="Connected Toolkits" />
         <Card className="p-4 rounded-2xl border-border/50 bg-card">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
@@ -393,8 +403,8 @@ export default function ProfilePage() {
               { id: 'twitter', name: 'Twitter / X', icon: X, color: 'bg-sky-500' },
               { id: 'notion', name: 'Notion', icon: Database, color: 'bg-black' },
             ].map((app) => {
-              const isConnected = connectedApps.connected.includes(app.id);
-              const isLoading = connectingApp === app.id;
+              const isConnected = connectedToolkits.connected.includes(app.id);
+              const isLoading = connectingToolkit === app.id;
               return (
                 <div key={app.id} className="flex items-center gap-3 p-3 rounded-xl border border-border/50 bg-muted/30">
                   <div className={`size-9 rounded-lg ${app.color} flex items-center justify-center shrink-0`}>
@@ -413,7 +423,7 @@ export default function ProfilePage() {
                       size="sm"
                       variant="ghost"
                       className="text-xs text-destructive hover:text-destructive h-7 px-2"
-                      onClick={() => handleDisconnectApp(app.id)}
+                      onClick={() => handleDisconnectToolkit(app.id)}
                     >
                       Disconnect
                     </Button>
@@ -422,8 +432,8 @@ export default function ProfilePage() {
                       size="sm"
                       variant="outline"
                       className="text-xs h-7 px-2"
-                      onClick={() => handleConnectApp(app.id)}
-                      disabled={isLoading || appsLoading}
+                      onClick={() => handleConnectToolkit(app.id)}
+                      disabled={isLoading || toolkitsLoading}
                     >
                       {isLoading ? <Loader2 className="size-3 animate-spin" /> : 'Connect'}
                     </Button>
@@ -434,7 +444,7 @@ export default function ProfilePage() {
           </div>
           <div className="mt-3 p-3 rounded-lg bg-muted/50 text-xs text-muted-foreground">
             <Link2 className="size-3 inline mr-1" />
-            Connect your apps so your AI agent can fetch emails, create GitHub issues, send messages, and more. Once connected, just ask naturally — &quot;fetch my last 2 emails&quot; or &quot;create a GitHub issue&quot;.
+            Connect toolkits so your AI agent can fetch emails, create GitHub issues, send messages, and more. Once connected, just ask naturally — &quot;fetch my last 2 emails&quot; or &quot;create a GitHub issue&quot;.
           </div>
         </Card>
       </div>
@@ -555,15 +565,18 @@ export default function ProfilePage() {
 
                   {expandedSection === 'email-prefs' && item.id === 'email-prefs' && (
                     <div className="p-4 bg-muted/30 border-t border-border space-y-3">
+                      {emailPrefsError && (
+                        <p className="text-xs text-amber-500 mb-2">Could not load preferences. Using defaults.</p>
+                      )}
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm font-medium">Task completion emails</p>
                           <p className="text-xs text-muted-foreground">Get notified when tasks finish</p>
                         </div>
                         <Switch
-                          checked={emailPrefs.taskCompletionEmails}
-                          onCheckedChange={(v) => handleEmailPrefToggle('taskCompletionEmails', v)}
-                          disabled={emailPrefsLoading}
+                          checked={emailPrefs.taskEmails}
+                          onCheckedChange={(v) => handleEmailPrefToggle('taskEmails', v)}
+                          disabled={emailPrefsLoading || emailPrefsError}
                         />
                       </div>
                       <Separator />
@@ -573,9 +586,9 @@ export default function ProfilePage() {
                           <p className="text-xs text-muted-foreground">Weekly summary of stored memories</p>
                         </div>
                         <Switch
-                          checked={emailPrefs.memoryDigestEmails}
-                          onCheckedChange={(v) => handleEmailPrefToggle('memoryDigestEmails', v)}
-                          disabled={emailPrefsLoading}
+                          checked={emailPrefs.memoryDigest}
+                          onCheckedChange={(v) => handleEmailPrefToggle('memoryDigest', v)}
+                          disabled={emailPrefsLoading || emailPrefsError}
                         />
                       </div>
                       <Separator />
@@ -587,7 +600,7 @@ export default function ProfilePage() {
                         <Switch
                           checked={emailPrefs.weeklySummary}
                           onCheckedChange={(v) => handleEmailPrefToggle('weeklySummary', v)}
-                          disabled={emailPrefsLoading}
+                          disabled={emailPrefsLoading || emailPrefsError}
                         />
                       </div>
                     </div>

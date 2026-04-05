@@ -1,3 +1,4 @@
+import { Composio } from '@composio/core';
 import type { ToolDefinition } from '@/types/database';
 import { isToolAllowed, type CapabilityPolicy } from './tool-categories';
 
@@ -31,17 +32,13 @@ function isComposioConfigured(): boolean {
 const sessionCache = new Map<string, any>();
 const clientCache = new Map<string, any>();
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getClient(): any {
+function getClient(): Composio {
   if (!isComposioConfigured()) {
-    throw new Error('COMPOSIO_API_KEY not configured');
+    throw new Error('COMPOSIO_API_KEY not configured — add it to your .env file');
   }
   
   const cacheKey = 'default';
   if (!clientCache.has(cacheKey)) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { Composio } = require('@composio/core');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     clientCache.set(cacheKey, new Composio({ apiKey: process.env.COMPOSIO_API_KEY! }));
   }
   return clientCache.get(cacheKey)!;

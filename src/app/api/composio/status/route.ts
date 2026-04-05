@@ -4,6 +4,12 @@ import { getComposioConnectionStatus } from '@/lib/composio';
 import { getOrCreateClerkUser } from '@/lib/database';
 
 export async function GET() {
+  const defaultResponse = { 
+    connected: [], 
+    available: ['gmail', 'github', 'slack', 'googlecalendar', 'twitter', 'notion'],
+    error: 'Composio not configured'
+  };
+
   try {
     const { userId: clerkUserId } = await auth();
     
@@ -12,14 +18,17 @@ export async function GET() {
     }
 
     const internalUser = await getOrCreateClerkUser(clerkUserId);
-    const { connected, available } = await getComposioConnectionStatus(internalUser.id);
-
-    return NextResponse.json({ connected, available });
+    
+    try {
+      const { connected, available } = await getComposioConnectionStatus(internalUser.id);
+      return NextResponse.json({ connected, available });
+    } catch (sdkError) {
+      console.error('[API] Composio SDK error:', sdkError);
+      return NextResponse.json(defaultResponse);
+    }
   } catch (error) {
     console.error('[API] Composio status error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to get status' },
-      { status: 500 }
-    );
+    // Even on auth/internal user error, return 200 with default to avoid crashing UI
+    return NextResponse.json(defaultResponse);
   }
 }

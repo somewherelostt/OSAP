@@ -34,7 +34,7 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
-        <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen antialiased`}>
+        <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen antialiased`} suppressHydrationWarning={true}>
           <AppShell>{children}</AppShell>
         </body>
       </html>
