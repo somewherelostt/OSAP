@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useUser } from '@clerk/nextjs';
+import { useSearchParams } from 'next/navigation';
 import { CommandInput } from '@/components/command-input';
 import { SectionHeader } from '@/components/section-header';
 import { QuickAction } from '@/components/quick-action';
@@ -27,6 +28,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
+import { TaskCard } from '@/components/task-card';
 import type { DbTask, DbMemoryNode } from '@/types/database';
 
 interface Task {
@@ -52,6 +54,9 @@ const quickActions = [
 ];
 
 export default function HomePage() {
+  const searchParams = useSearchParams();
+  const initialQuery = searchParams.get('q') || searchParams.get('query') || '';
+  
   const { user: clerkUser, isLoaded: isAuthLoaded } = useUser();
   const { isAuthenticated } = useAuth();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -60,7 +65,13 @@ export default function HomePage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
+  const [commandInputValue, setCommandInputValue] = useState(initialQuery);
+
+  useEffect(() => {
+    if (initialQuery) {
+      setCommandInputValue(initialQuery);
+    }
+  }, [initialQuery]);
 
   const examplePrompts = [
     { text: 'Fetch my last 2 emails', query: 'Fetch my last 2 emails' },
@@ -161,14 +172,6 @@ export default function HomePage() {
     return 'Good evening';
   };
 
-  const toggleTaskExpand = (taskId: string) => {
-    setExpandedTasks(prev => {
-      const next = new Set(prev);
-      if (next.has(taskId)) next.delete(taskId);
-      else next.add(taskId);
-      return next;
-    });
-  };
 
   const isNotConnectedError = (error: string | undefined): boolean => {
     if (!error) return false;
@@ -239,6 +242,7 @@ export default function HomePage() {
           placeholder={isAuthenticated ? 'What would you like to do?' : 'Sign in to get started...'}
           onSubmit={handleCommand}
           disabled={isSubmitting}
+          initialValue={commandInputValue}
         />
         {isSubmitting && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
@@ -337,99 +341,9 @@ export default function HomePage() {
                   </p>
                 </Card>
               ) : (
-                tasks.slice(0, 5).map((task) => {
-                  const taskResult = task.result as Record<string, unknown> | null;
-                  const steps = taskResult?.steps as Array<{ step?: { tool?: string; description?: string }; result?: unknown; status?: string; error?: string }> | null;
-                  const isExpanded = expandedTasks.has(task.id);
-                  const isNotConnected = task.status === 'failed' && isNotConnectedError(task.error);
-
-                  return (
-                    <div key={task.id} className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <div className="shrink-0">
-                          {task.status === 'success' ? (
-                            <CheckCircle2 className="size-4 text-green-500" />
-                          ) : task.status === 'failed' ? (
-                            <AlertCircle className="size-4 text-red-500" />
-                          ) : task.status === 'running' ? (
-                            <Loader2 className="size-4 text-blue-500 animate-spin" />
-                          ) : (
-                            <Clock className="size-4 text-muted-foreground" />
-                          )}
-                        </div>
-                        <button
-                          className="flex-1 text-left min-w-0"
-                          onClick={() => window.location.href = `/tasks?id=${task.id}`}
-                        >
-                          <p className="text-sm font-medium truncate">
-                            {task.title || task.input.substring(0, 50) + (task.input.length > 50 ? '...' : '')}
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs text-muted-foreground">
-                              {task.error ? (
-                                <span className="text-red-500">{task.error.substring(0, 60)}{task.error.length > 60 ? '...' : ''}</span>
-                              ) : formatTimeAgo(task.created_at)}
-                            </p>
-                            {isNotConnected && (
-                              <a
-                                href="/profile#connected-apps"
-                                className="text-xs text-blue-500 hover:underline flex items-center gap-1"
-                              >
-                                <Link2 className="size-3" />
-                                Connect App
-                              </a>
-                            )}
-                          </div>
-                        </button>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {(task.status === 'success' || task.status === 'failed') && (
-                            <button
-                              onClick={() => copyResult(task)}
-                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                              title="Copy result"
-                            >
-                              <Copy className="size-3" />
-                            </button>
-                          )}
-                          {task.status === 'success' && taskResult && (
-                            <button
-                              onClick={() => toggleTaskExpand(task.id)}
-                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                              title={isExpanded ? 'Collapse' : 'Expand'}
-                            >
-                              {isExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-                            </button>
-                          )}
-                          <StatusBadge status={task.status} />
-                        </div>
-                      </div>
-                      {task.status === 'success' && taskResult && (
-                        <div className="ml-6 space-y-1">
-                          {taskResult.answer !== undefined && taskResult.answer !== null && (
-                            <p className="text-xs text-foreground bg-muted/30 rounded px-2 py-1 font-mono whitespace-pre-wrap break-words">
-                              {String(taskResult.answer).substring(0, 200)}{String(taskResult.answer).length > 200 ? '...' : ''}
-                            </p>
-                          )}
-                          {isExpanded && steps && steps.length > 0 && (
-                            <div className="space-y-1 pl-2 border-l border-border">
-                              {steps.map((s, i) => (
-                                <div key={i} className="text-xs">
-                                  <span className="text-muted-foreground">{s.step?.tool || `Step ${i + 1}`}</span>
-                                  {s.status === 'failed' && (
-                                    <span className="text-red-500 ml-1">— {s.error?.substring(0, 50) || 'failed'}</span>
-                                  )}
-                                  {s.status === 'success' && s.result !== undefined && s.result !== null && (
-                                    <span className="text-green-500 ml-1">— Done</span>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
+                tasks.slice(0, 5).map((task) => (
+                  <TaskCard key={task.id} task={task as any} />
+                ))
               )}
             </div>
           </div>

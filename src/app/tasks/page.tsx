@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import type { DbTask, TaskPlan } from '@/types/database';
 import { useAnonymousUser } from '@/lib/use-anonymous-user';
+import { TaskCard } from '@/components/task-card';
 
 type FilterStatus = 'all' | 'running' | 'done' | 'failed';
 
@@ -310,104 +311,9 @@ export default function TasksPage() {
             </p>
           </div>
         ) : (
-          filteredTasks.map((task) => {
-            const taskResult = task.result as Record<string, unknown> | null;
-            const plan = task.plan as TaskPlan | undefined;
-            const isExpanded = expandedTaskId === task.id;
-            const duration = getTaskDuration(task);
-            const answer = taskResult?.answer as string | undefined || taskResult?.summary as string | undefined;
-
-            return (
-              <Card
-                key={task.id}
-                className={`border-l-4 overflow-hidden border border-border/50 bg-card hover:bg-accent/30 transition-all cursor-pointer ${getBorderColor(task.status)}`}
-                onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
-              >
-                <div className="p-4">
-                  <div className="flex items-start gap-3">
-                    {/* Status Icon */}
-                    <div className="mt-0.5">
-                      {task.status === 'running' ? (
-                        <Loader2 className="size-4 text-blue-500 animate-spin" />
-                      ) : task.status === 'success' ? (
-                        <CheckCircle2 className="size-4 text-green-500" />
-                      ) : task.status === 'failed' ? (
-                        <AlertCircle className="size-4 text-red-500" />
-                      ) : (
-                        <div className="size-4 rounded-full bg-muted" />
-                      )}
-                    </div>
-
-                    {/* Main Content */}
-                    <div className="flex-1 min-w-0 space-y-2">
-                      {/* Title */}
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="font-medium text-sm leading-tight">{task.input}</h3>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <StatusBadge status={task.status} />
-                          <div className="text-muted-foreground">
-                            {isExpanded ? (
-                              <ChevronDown className="size-4" />
-                            ) : (
-                              <ChevronRight className="size-4" />
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Meta Row */}
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Clock className="size-3" />
-                          {formatTimeAgo(task.created_at)}
-                        </span>
-                        {duration && (
-                          <span>· {duration}</span>
-                        )}
-                      </div>
-
-                      {/* Answer/Result inside card */}
-                      {answer && (
-                        <div className="flex items-start gap-2 pl-3 border-l-2 border-muted overflow-hidden">
-                          <ArrowRight className="size-3 text-muted-foreground mt-1 shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            {formatTaskResult(answer)}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Error Message */}
-                      {task.status === 'failed' && task.error && (
-                        <div className="flex items-start gap-2 p-2 rounded-lg bg-red-500/5 border border-red-500/20">
-                          <AlertCircle className="size-3 text-red-500 mt-0.5 shrink-0" />
-                          <span className="text-xs text-red-500">{task.error}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Expanded Content */}
-                {isExpanded && (
-                  <div className="border-t border-border/50 p-4 space-y-4 bg-muted/20">
-                    {/* Plan Steps */}
-                    {renderPlanSteps(plan)}
-
-                    {/* Memory Stored */}
-                    {renderMemorySection(task)}
-
-                    {/* Total Time */}
-                    {duration && (
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Clock className="size-3" />
-                        <span>Total time: {duration}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Card>
-            );
-          })
+          filteredTasks.map((task) => (
+            <TaskCard key={task.id} task={task as any} initiallyExpanded={expandedTaskId === task.id} />
+          ))
         )}
       </div>
     </div>

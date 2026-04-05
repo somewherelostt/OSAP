@@ -10,17 +10,28 @@ interface CommandInputProps {
   onSubmit?: (value: string) => void;
   disabled?: boolean;
   className?: string;
+  initialValue?: string;
 }
 
 export function CommandInput({
   placeholder = 'What do you want to do?',
   onSubmit,
   disabled,
-  className
+  className,
+  initialValue = ''
 }: CommandInputProps) {
-  const [value, setValue] = useState('');
+  const [value, setValue] = useState(initialValue);
   const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (initialValue) {
+      setValue(initialValue);
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
+    }
+  }, [initialValue]);
 
   useEffect(() => {
     if (textareaRef.current) {

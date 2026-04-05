@@ -94,22 +94,82 @@ export async function createAndExecuteTask(
     let hasFailure = false;
     const BUILT_IN_TOOLS = ['memory_store', 'memory_recall', 'http_request', 'github_create_issue', 'github_get_issues', 'email_send', 'twitter_post', 'composio_search_tools', 'composio_execute_tool'];
 
+    function formatStepResult(tool: string, result: any): string {
+      if (!result) return 'Completed';
+      const data = result;
+
+      // Gmail Fetch / List
+      if (tool.includes('GMAIL_FETCH') || tool.includes('GMAIL_LIST')) {
+        const messages = data.messages || [];
+        if (messages.length === 0) return 'No emails found.';
+        let summary = `Found ${messages.length} email${messages.length > 1 ? 's' : ''}:\n`;
+        messages.forEach((msg: any, i: number) => {
+          const from = msg.sender || msg.from || 'Unknown';
+          const subject = msg.subject || '(No Subject)';
+          const date = msg.date || 'Recently';
+          summary += `${i + 1}. From: ${from} | Subject: ${subject} | ${date}\n`;
+        });
+        return summary.trim();
+      }
+
+      // Gmail Send / Draft
+      if (tool.includes('GMAIL_SEND') || tool.includes('GMAIL_CREATE_EMAIL_DRAFT')) {
+        const id = data.id || data.messageId || 'Unknown';
+        const labels = data.labelIds ? data.labelIds.join(', ') : 'SENT';
+        return `✓ Email sent successfully\nMessage ID: ${id}\nLabels: ${labels}`;
+      }
+
+      // Gmail Get by ID
+      if (tool.includes('GMAIL_GET_EMAIL_BY_ID')) {
+        const subject = data.subject || '(No Subject)';
+        const from = data.sender || data.from || 'Unknown';
+        const body = data.messageText || data.snippet || '';
+        return `Subject: ${subject}\nFrom: ${from}\n---\n${body.substring(0, 200)}${body.length > 200 ? '...' : ''}`;
+      }
+
+      // GitHub Create Issue
+      if (tool === 'github_create_issue' || tool.includes('GITHUB_CREATE_ISSUE')) {
+        const number = data.number || data.id;
+        const url = data.html_url || data.url;
+        return `✓ Issue #${number} created: ${data.title} — ${url}`;
+      }
+
+      // GitHub List Issues
+      if (tool === 'github_get_issues' || tool.includes('GITHUB_LIST_ISSUES')) {
+        const issues = Array.isArray(data) ? data : data.issues || [];
+        if (issues.length === 0) return 'No issues found.';
+        let summary = `Found ${issues.length} issues:\n`;
+        issues.forEach((issue: any, i: number) => {
+          summary += `${i + 1}. #${issue.number} ${issue.title} [${issue.state}]\n`;
+        });
+        return summary.trim();
+      }
+
+      // Memory Store
+      if (tool === 'memory_store') {
+        const content = data.content || (typeof data === 'string' ? data : 'data');
+        return `✓ Stored in memory: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`;
+      }
+
+      // Memory Recall
+      if (tool === 'memory_recall') {
+        const content = data.content || (Array.isArray(data) ? data.map((m: any) => m.content).join('\n') : String(data));
+        return content;
+      }
+
+      // Default fallback
+      if (typeof data === 'object' && data !== null) {
+        return 'Completed successfully';
+      }
+      return String(data);
+    }
+
     function normalizeStepResult(result: unknown): string {
       if (!result) return '';
       if (typeof result === 'string') return result;
-      if (Array.isArray(result)) {
-        return result.map(item => normalizeStepResult(item)).join('\n');
-      }
-      if (typeof result === 'object') {
+      if (typeof result === 'object' && result !== null) {
         const obj = result as Record<string, unknown>;
-        if (obj.text) return String(obj.text);
-        if (obj.message) return String(obj.message);
-        if (obj.body) return String(obj.body);
-        if (obj.content) return String(obj.content);
-        if (obj.html) return String(obj.html);
-        if (obj.data) return normalizeStepResult(obj.data);
-        if (obj.response) return normalizeStepResult(obj.response);
-        return JSON.stringify(result, null, 2);
+        return String(obj.answer || obj.message || obj.text || JSON.stringify(result));
       }
       return String(result);
     }
@@ -142,11 +202,14 @@ export async function createAndExecuteTask(
         }
         
         if (result.success) {
+          const formatted = formatStepResult(step.tool, result.data);
           await updateTaskStep(stepRecord.id, { 
             status: 'success', 
             tool_output: result.data,
+            // Note: We don't have a column for formatted, so we'll store it in the JSON if needed,
+            // but for now we'll just use it in the in-memory results array
           });
-          stepResults.push({ step, result: result.data, status: 'success' });
+          stepResults.push({ step, result: result.data, formatted, status: 'success' });
         } else {
           await updateTaskStep(stepRecord.id, { 
             status: 'failed', 
@@ -176,8 +239,9 @@ export async function createAndExecuteTask(
     
     const finalResult = {
       answer: finalAnswer,
+      formatted_answer: stepResults.length > 0 ? stepResults[stepResults.length - 1].formatted : null,
       summary: finalAnswer
-        ? String(finalAnswer)
+        ? String(finalAnswer).substring(0, 100)
         : `Completed ${stepResults.length} steps`,
       steps: stepResults,
     };
