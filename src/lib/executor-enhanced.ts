@@ -96,11 +96,16 @@ export async function createAndExecuteTask(
 
     function formatStepResult(tool: string, result: any): string {
       if (!result) return 'Completed';
-      const data = result;
+      
+      // Composio often wraps the actual API response in a 'data' field
+      // We unwrap it here so tool-specific logic can access fields directly
+      const data = (result && typeof result === 'object' && 'data' in result && result.data) 
+        ? result.data 
+        : result;
 
       // Gmail Fetch / List
       if (tool.includes('GMAIL_FETCH') || tool.includes('GMAIL_LIST')) {
-        const messages = data.messages || [];
+        const messages = data.messages || (Array.isArray(data) ? data : []);
         if (messages.length === 0) return 'No emails found.';
         let summary = `Found ${messages.length} email${messages.length > 1 ? 's' : ''}:\n`;
         messages.forEach((msg: any, i: number) => {
