@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { getOrCreateClerkUser } from '@/lib/database';
-import { supabase } from '@/lib/database';
+import { getOrCreateClerkUser, getSupabase } from '@/lib/database';
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,7 +12,7 @@ export async function GET(request: NextRequest) {
 
     const internalUser = await getOrCreateClerkUser(clerkUserId);
     
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
       .from('users')
       .select('user_preferences')
       .eq('id', internalUser.id)
@@ -54,7 +53,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Fetch existing preferences
-    const { data: existing } = await supabase
+    const { data: existing } = await getSupabase()
       .from('users')
       .select('user_preferences')
       .eq('id', internalUser.id)
@@ -63,7 +62,7 @@ export async function PATCH(request: NextRequest) {
     const currentPrefs = existing?.user_preferences || {};
     const updatedPrefs = { ...currentPrefs, [preferenceKey]: value };
     
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
       .from('users')
       .update({ user_preferences: updatedPrefs })
       .eq('id', internalUser.id)
