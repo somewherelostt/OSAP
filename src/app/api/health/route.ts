@@ -1,6 +1,6 @@
 import { testGlmConnection } from '@/lib/glm';
 import { isHydraConfigured } from '@/lib/hydra';
-import { supabase } from '@/lib/database';
+import { getSupabase } from '@/lib/database';
 import { testComposioConnection } from '@/lib/composio';
 
 export async function GET() {
@@ -19,7 +19,7 @@ export async function GET() {
   checks.hydradb.status = isHydraConfigured() ? 'healthy' : 'not_configured';
 
   try {
-    const { error } = await supabase.from('users').select('id').limit(1);
+    const { error } = await getSupabase().from('users').select('id').limit(1);
     checks.supabase.status = error ? 'unhealthy' : 'healthy';
     checks.supabase.error = error?.message;
   } catch (e) {
