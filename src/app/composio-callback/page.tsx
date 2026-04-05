@@ -11,8 +11,9 @@ export default function ComposioCallback() {
     const params = new URLSearchParams(window.location.search);
     const success = params.get('success');
     const error = params.get('error');
+    const connectedAccountId = params.get('connected_account_id');
 
-    if (success === 'true') {
+    if (success === 'true' || connectedAccountId) {
       queueMicrotask(() => {
         setStatus('success');
         setMessage('App connected successfully!');

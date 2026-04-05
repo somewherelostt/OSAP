@@ -728,7 +728,20 @@ export default function DevPage() {
               </div>
 
               {/* Monaco Editor */}
-              <div className="flex-1 overflow-hidden">
+              <div className="flex-1 overflow-hidden relative">
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+                  <div className="flex flex-col items-center gap-3 p-8 bg-card border border-border/50 rounded-2xl shadow-2xl max-w-[300px] text-center">
+                    <div className="size-12 bg-primary/10 rounded-full flex items-center justify-center">
+                      <Code2 className="size-6 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-lg">Coming Soon</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        The OSAP Agent-IDE is currently under construction. Native code editing and direct agent deployment is coming in our next major release.
+                      </p>
+                    </div>
+                  </div>
+                </div>
                 <CodeEditor
                   file={currentFile || undefined}
                   onChange={(content, fileId) => updateFileContent(fileId, content)}
@@ -941,8 +954,17 @@ export default function DevPage() {
           </div>
           <div
             ref={terminalRef}
-            className="flex-1 p-2 overflow-hidden"
-          />
+            className="flex-1 p-2 overflow-hidden relative"
+          >
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#0d1117]/80 backdrop-blur-[2px]">
+              <div className="flex flex-col items-center gap-3 p-6 bg-[#161b22] border border-border/20 rounded-xl shadow-2xl text-center">
+                <div className="size-10 bg-primary/10 rounded-full flex items-center justify-center">
+                  <TerminalIcon className="size-5 text-primary" />
+                </div>
+                <h3 className="font-medium text-[#c9d1d9]">Coming Soon</h3>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
