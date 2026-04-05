@@ -47,13 +47,35 @@ export default function AgentPage() {
   useEffect(() => {
     createAgent();
     loadTasks();
+  }, []);
 
-    const interval = setInterval(() => {
-      loadTasks();
-    }, 5000);
+  const pollAgent = useCallback(async () => {
+    if (!agent?.id) return;
+    try {
+      const response = await fetch(`/api/agent?agentId=${agent.id}`);
+      const data = await response.json();
+      if (data.agent) {
+        setAgent(data.agent);
+        if (data.agent.status === 'completed' || data.agent.status === 'failed') {
+          setIsRunning(false);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to poll agent:', error);
+    }
+  }, [agent?.id]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (isRunning || (agent && agent.status !== 'idle' && agent.status !== 'completed' && agent.status !== 'failed')) {
+      interval = setInterval(pollAgent, 2000);
+    } else {
+      interval = setInterval(loadTasks, 5000);
+    }
 
     return () => clearInterval(interval);
-  }, []);
+  }, [isRunning, agent?.status, pollAgent]);
 
   const createAgent = async () => {
     setIsCreating(true);
@@ -64,7 +86,7 @@ export default function AgentPage() {
         body: JSON.stringify({ action: 'create' }),
       });
       const data = await response.json();
-      setAgent(data.agent);
+      if (data.agent) setAgent(data.agent);
     } catch (error) {
       console.error('Failed to create agent:', error);
     } finally {
@@ -86,6 +108,9 @@ export default function AgentPage() {
     if (!taskInput.trim() || !agent) return;
 
     setIsRunning(true);
+    const input = taskInput;
+    setTaskInput(''); // Clear input immediately
+    
     try {
       const response = await fetch('/api/agent', {
         method: 'POST',
@@ -93,7 +118,7 @@ export default function AgentPage() {
         body: JSON.stringify({
           action: 'execute',
           agentId: agent.id,
-          task: taskInput,
+          task: input,
         }),
       });
       const data = await response.json();
@@ -103,11 +128,10 @@ export default function AgentPage() {
       }
       
       if (data.task) {
-        setTasks(prev => [...prev, data.task]);
+        setTasks(prev => [data.task, ...prev]);
       }
     } catch (error) {
       console.error('Failed to execute task:', error);
-    } finally {
       setIsRunning(false);
     }
   };
@@ -124,7 +148,7 @@ export default function AgentPage() {
         }),
       });
       const data = await response.json();
-      setAgent(data.agent);
+      if (data.agent) setAgent(data.agent);
     } catch (error) {
       console.error('Failed to pause agent:', error);
     }
@@ -142,7 +166,7 @@ export default function AgentPage() {
         }),
       });
       const data = await response.json();
-      setAgent(data.agent);
+      if (data.agent) setAgent(data.agent);
     } catch (error) {
       console.error('Failed to resume agent:', error);
     }
@@ -160,8 +184,10 @@ export default function AgentPage() {
         }),
       });
       const data = await response.json();
-      setAgent(data.agent);
-      setIsRunning(false);
+      if (data.agent) {
+        setAgent(data.agent);
+        setIsRunning(false);
+      }
     } catch (error) {
       console.error('Failed to abort agent:', error);
     }
@@ -179,8 +205,11 @@ export default function AgentPage() {
         }),
       });
       const data = await response.json();
-      setAgent(data.agent);
-      setIsRunning(false);
+      if (data.agent) {
+        setAgent(data.agent);
+        setTasks([]);
+        setIsRunning(false);
+      }
     } catch (error) {
       console.error('Failed to reset agent:', error);
     }

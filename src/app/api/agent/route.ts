@@ -1,11 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { AgentOrchestrator } from '@/lib/agent/orchestrator';
-import { BackgroundTaskManager } from '@/lib/agent/background-tasks';
+import { getAgentOrchestrator } from '@/lib/agent/orchestrator';
+import { getBackgroundTaskManager } from '@/lib/agent/background-tasks';
 import { getOrCreateClerkUser } from '@/lib/database';
+import { executeTool } from '@/lib/tools-enhanced';
+import { executeComposioToolCall } from '@/lib/composio';
+import { formatStepResult, summarizeForMemory } from '@/lib/executor-enhanced';
+import { DEFAULT_POLICY } from '@/lib/tool-categories';
+import { storeMemory as hydraStoreMemory } from '@/lib/hydra';
+import { createMemoryNode } from '@/lib/database';
 
-const orchestrator = new AgentOrchestrator();
-const taskManager = new BackgroundTaskManager();
+const BUILT_IN_TOOLS = [
+  'memory_store', 
+  'memory_recall', 
+  'http_request', 
+  'github_create_issue', 
+  'github_get_issues', 
+  'email_send', 
+  'twitter_post', 
+  'composio_search_tools', 
+  'composio_execute_tool'
+];
 
 export async function GET(request: NextRequest) {
   const { userId: clerkUserId } = await auth();
@@ -19,13 +34,22 @@ export async function GET(request: NextRequest) {
 
   if (type === 'tasks') {
     return NextResponse.json({
-      tasks: taskManager.getAllTasks(),
-      metrics: taskManager.getMetrics(),
+      tasks: getBackgroundTaskManager().getAllTasks(),
+      metrics: getBackgroundTaskManager().getMetrics(),
     });
   }
 
+  const agentId = searchParams.get('agentId');
+
+  if (agentId) {
+    const orchestrator = getAgentOrchestrator();
+    const agent = orchestrator.getAgent(agentId);
+    if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    return NextResponse.json({ agent });
+  }
+
   return NextResponse.json({
-    agents: orchestrator.getAllAgents(),
+    agents: getAgentOrchestrator().getAllAgents(),
   });
 }
 
@@ -40,6 +64,9 @@ export async function POST(request: NextRequest) {
     const user = await getOrCreateClerkUser(clerkUserId);
     const body = await request.json();
     const { action, agentId, task } = body;
+
+    const orchestrator = getAgentOrchestrator();
+    const taskManager = getBackgroundTaskManager();
 
     if (action === 'create') {
       const agent = orchestrator.createAgent({
@@ -100,41 +127,68 @@ export async function POST(request: NextRequest) {
 
       taskManager.execute(bgTask.id, async (t, update) => {
         update(0, 'Starting execution...');
+        const results = [];
         
         for (const step of plan.steps) {
-          update((step.order / plan.steps.length) * 100, `Executing step ${step.order}: ${step.action}`);
+          const progress = (plan.steps.indexOf(step) / plan.steps.length) * 100;
+          update(progress, `Executing ${step.action}...`);
 
           const result = await orchestrator.executeStep(agentId, step.id, async () => {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            return { success: true, output: `Executed ${step.action}` };
+            if (BUILT_IN_TOOLS.includes(step.action)) {
+              return await executeTool(step.action, step.input, user.id, DEFAULT_POLICY);
+            } else {
+              return await executeComposioToolCall(user.id, {
+                name: step.action,
+                parameters: step.input,
+              });
+            }
           });
 
           if (!result.success) {
-            update((step.order / plan.steps.length) * 100, `Retrying step ${step.order}...`);
+            update(progress, `Step failed: ${result.error}. Attempting self-correction...`);
             
-            const correction = await orchestrator.correct(agentId, step.id, async (failedStep, error) => ({
-              type: failedStep.retryCount < failedStep.maxRetries ? 'retry' : 'abort',
-              reason: error,
-              originalStep: failedStep.action,
-              newApproach: failedStep.action,
-              success: true,
-            }));
+            const correction = await orchestrator.correct(agentId, step.id, async (fs, err) => {
+              const type = fs.retryCount < fs.maxRetries ? 'retry' : 'abort';
+              return {
+                type,
+                reason: err,
+                success: type === 'retry',
+              };
+            });
 
             if (correction.type === 'retry') {
-              await orchestrator.executeStep(agentId, step.id, async () => {
-                await new Promise(resolve => setTimeout(resolve, 500));
-                return { success: true, output: `Retried ${step.action}` };
-              });
+              step.retryCount++;
+              continue; 
             } else {
-              throw new Error(`Step ${step.id} failed: ${result.error}`);
+              orchestrator.setStatus(agentId, 'failed');
+              throw new Error(`Execution failed at step ${step.action}: ${result.error}`);
             }
           }
+
+          results.push({ step: step.action, output: result.output });
+          const formatted = formatStepResult(step.action, result.output);
+          update(progress + (5 / plan.steps.length), `Think: ${formatted.substring(0, 50)}...`);
+          await orchestrator.think(agentId, context, `Completed ${step.action}: ${formatted.substring(0, 100)}`);
         }
 
-        update(100, 'Execution complete');
+        update(100, 'Saving memories and finalizing...');
+        const memoryText = summarizeForMemory(task, results);
+        try {
+          await hydraStoreMemory(memoryText, { userId: user.id, taskId: bgTask.id });
+        } catch (e) {
+          console.warn('[AgentRoute] HydraDB store failed, falling back to Supabase');
+          await createMemoryNode({
+            user_id: user.id,
+            type: 'task_summary',
+            content: memoryText,
+            source: 'autonomous_agent',
+            importance: 0.8,
+            metadata: {},
+          });
+        }
+
         orchestrator.setStatus(agentId, 'completed');
-        
-        return { success: true, planId: plan.id };
+        return { success: true, summary: memoryText };
       });
 
       return NextResponse.json({
@@ -145,31 +199,30 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'pause' && agentId) {
-      orchestrator.pause(agentId);
-      return NextResponse.json({ agent: orchestrator.getAgent(agentId) });
+      getAgentOrchestrator().pause(agentId);
+      return NextResponse.json({ agent: getAgentOrchestrator().getAgent(agentId) });
     }
 
     if (action === 'resume' && agentId) {
-      orchestrator.resume(agentId);
-      return NextResponse.json({ agent: orchestrator.getAgent(agentId) });
+      getAgentOrchestrator().resume(agentId);
+      return NextResponse.json({ agent: getAgentOrchestrator().getAgent(agentId) });
     }
 
     if (action === 'abort' && agentId) {
-      orchestrator.abort(agentId);
-      return NextResponse.json({ agent: orchestrator.getAgent(agentId) });
+      getAgentOrchestrator().abort(agentId);
+      return NextResponse.json({ agent: getAgentOrchestrator().getAgent(agentId) });
     }
 
+    // Reset move to top level or stay here, keeping it here is fine.
     if (action === 'reset' && agentId) {
+      const orchestrator = getAgentOrchestrator();
       orchestrator.clearPlan(agentId);
       orchestrator.clearThoughts(agentId);
       orchestrator.setStatus(agentId, 'idle');
       return NextResponse.json({ agent: orchestrator.getAgent(agentId) });
     }
 
-    if (action === 'reasoning' && agentId) {
-      const reasoning = orchestrator.getReasoning(agentId);
-      return NextResponse.json(reasoning);
-    }
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   } catch (error) {

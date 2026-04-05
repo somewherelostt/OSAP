@@ -30,6 +30,123 @@ import { executeComposioToolCall } from './composio';
 
 initializeTools();
 
+export function formatStepResult(tool: string, result: any): string {
+  if (!result) return 'Completed';
+  
+  const data = (result && typeof result === 'object' && 'data' in result && result.data) 
+    ? result.data 
+    : result;
+
+  if (tool.includes('GMAIL_FETCH') || tool.includes('GMAIL_LIST')) {
+    const messages = data.messages || (Array.isArray(data) ? data : []);
+    if (messages.length === 0) return 'No emails found.';
+    let summary = `Found ${messages.length} email${messages.length > 1 ? 's' : ''}:\n`;
+    messages.forEach((msg: any, i: number) => {
+      const from = msg.sender || msg.from || 'Unknown';
+      const subject = msg.subject || '(No Subject)';
+      const date = msg.date || 'Recently';
+      summary += `${i + 1}. From: ${from} | Subject: ${subject} | ${date}\n`;
+    });
+    return summary.trim();
+  }
+
+  if (tool.includes('GMAIL_SEND') || tool.includes('GMAIL_CREATE_EMAIL_DRAFT')) {
+    const id = data.id || data.messageId || 'Unknown';
+    const labels = data.labelIds ? data.labelIds.join(', ') : 'SENT';
+    return `✓ Email sent successfully\nMessage ID: ${id}\nLabels: ${labels}`;
+  }
+
+  if (tool.includes('GMAIL_GET_EMAIL_BY_ID')) {
+    const subject = data.subject || '(No Subject)';
+    const from = data.sender || data.from || 'Unknown';
+    const body = data.messageText || data.snippet || '';
+    return `Subject: ${subject}\nFrom: ${from}\n---\n${body.substring(0, 200)}${body.length > 200 ? '...' : ''}`;
+  }
+
+  if (tool === 'github_create_issue' || tool.includes('GITHUB_CREATE_ISSUE')) {
+    const number = data.number || data.id;
+    const url = data.html_url || data.url;
+    return `✓ Issue #${number} created: ${data.title} — ${url}`;
+  }
+
+  if (tool === 'github_get_issues' || tool.includes('GITHUB_LIST_ISSUES')) {
+    const issues = Array.isArray(data) ? data : data.issues || [];
+    if (issues.length === 0) return 'No issues found.';
+    let summary = `Found ${issues.length} issues:\n`;
+    issues.forEach((issue: any, i: number) => {
+      summary += `${i + 1}. #${issue.number} ${issue.title} [${issue.state}]\n`;
+    });
+    return summary.trim();
+  }
+
+  if (tool === 'memory_store') {
+    const content = data.content || (typeof data === 'string' ? data : 'data');
+    return `✓ Stored in memory: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`;
+  }
+
+  if (tool === 'memory_recall') {
+    const content = data.content || (Array.isArray(data) ? data.map((m: any) => m.content).join('\n') : String(data));
+    return content;
+  }
+
+  if (typeof data === 'object' && data !== null) {
+    return 'Completed successfully';
+  }
+  return String(data);
+}
+
+export function summarizeForMemory(taskInput: string, result: any): string {
+  if (!result) return `Task completed: ${taskInput.substring(0, 100)}`;
+  
+  const data = (result && typeof result === 'object' && 'data' in result && result.data) 
+    ? result.data 
+    : result;
+
+  const isGarbage = (text: string) => {
+    if (!text || typeof text !== 'string') return false;
+    const words = text.split(/\s+/);
+    const hasLongWord = words.some(w => w.length > 50);
+    const nonAlphaRatio = (text.match(/[^a-zA-Z0-9\s,.!?-]/g) || []).length / text.length;
+    return hasLongWord || nonAlphaRatio > 0.4;
+  };
+
+  if (data.messages && Array.isArray(data.messages)) {
+    const count = data.messages.length;
+    const recent = data.messages[0];
+    const from = recent?.sender || recent?.from || 'Unknown';
+    const subject = recent?.subject || '(No Subject)';
+    return `Fetched ${count} email${count > 1 ? 's' : ''}. Most recent from ${from} about "${subject}".`;
+  }
+
+  if (data.id || data.messageId) {
+    if (taskInput.toLowerCase().includes('send') || taskInput.toLowerCase().includes('email')) {
+      const toMatch = taskInput.match(/to\s+([^\s,]+)/i);
+      const to = toMatch ? toMatch[1] : 'recipient';
+      return `Sent email to ${to}${data.subject ? ` with subject "${data.subject}"` : ''}.`;
+    }
+  }
+
+  if (data.number && (data.html_url || data.url)) {
+    return `Created GitHub issue #${data.number}: "${data.title || 'Untitled'}"`;
+  }
+
+  if (typeof data === 'string' && !isGarbage(data)) {
+    return `Question: ${taskInput}. Answer: ${data}`;
+  }
+
+  return `Task completed: ${taskInput.substring(0, 100)}${taskInput.length > 100 ? '...' : ''}`;
+}
+
+export function normalizeStepResult(result: unknown): string {
+  if (!result) return '';
+  if (typeof result === 'string') return result;
+  if (typeof result === 'object' && result !== null) {
+    const obj = result as Record<string, unknown>;
+    return String(obj.answer || obj.message || obj.text || JSON.stringify(result));
+  }
+  return String(result);
+}
+
 export interface ExecuteTaskInput {
   userId: string;
   userInput: string;
@@ -94,139 +211,8 @@ export async function createAndExecuteTask(
     let hasFailure = false;
     const BUILT_IN_TOOLS = ['memory_store', 'memory_recall', 'http_request', 'github_create_issue', 'github_get_issues', 'email_send', 'twitter_post', 'composio_search_tools', 'composio_execute_tool'];
 
-    function formatStepResult(tool: string, result: any): string {
-      if (!result) return 'Completed';
-      
-      // Composio often wraps the actual API response in a 'data' field
-      // We unwrap it here so tool-specific logic can access fields directly
-      const data = (result && typeof result === 'object' && 'data' in result && result.data) 
-        ? result.data 
-        : result;
-
-      // Gmail Fetch / List
-      if (tool.includes('GMAIL_FETCH') || tool.includes('GMAIL_LIST')) {
-        const messages = data.messages || (Array.isArray(data) ? data : []);
-        if (messages.length === 0) return 'No emails found.';
-        let summary = `Found ${messages.length} email${messages.length > 1 ? 's' : ''}:\n`;
-        messages.forEach((msg: any, i: number) => {
-          const from = msg.sender || msg.from || 'Unknown';
-          const subject = msg.subject || '(No Subject)';
-          const date = msg.date || 'Recently';
-          summary += `${i + 1}. From: ${from} | Subject: ${subject} | ${date}\n`;
-        });
-        return summary.trim();
-      }
-
-      // Gmail Send / Draft
-      if (tool.includes('GMAIL_SEND') || tool.includes('GMAIL_CREATE_EMAIL_DRAFT')) {
-        const id = data.id || data.messageId || 'Unknown';
-        const labels = data.labelIds ? data.labelIds.join(', ') : 'SENT';
-        return `✓ Email sent successfully\nMessage ID: ${id}\nLabels: ${labels}`;
-      }
-
-      // Gmail Get by ID
-      if (tool.includes('GMAIL_GET_EMAIL_BY_ID')) {
-        const subject = data.subject || '(No Subject)';
-        const from = data.sender || data.from || 'Unknown';
-        const body = data.messageText || data.snippet || '';
-        return `Subject: ${subject}\nFrom: ${from}\n---\n${body.substring(0, 200)}${body.length > 200 ? '...' : ''}`;
-      }
-
-      // GitHub Create Issue
-      if (tool === 'github_create_issue' || tool.includes('GITHUB_CREATE_ISSUE')) {
-        const number = data.number || data.id;
-        const url = data.html_url || data.url;
-        return `✓ Issue #${number} created: ${data.title} — ${url}`;
-      }
-
-      // GitHub List Issues
-      if (tool === 'github_get_issues' || tool.includes('GITHUB_LIST_ISSUES')) {
-        const issues = Array.isArray(data) ? data : data.issues || [];
-        if (issues.length === 0) return 'No issues found.';
-        let summary = `Found ${issues.length} issues:\n`;
-        issues.forEach((issue: any, i: number) => {
-          summary += `${i + 1}. #${issue.number} ${issue.title} [${issue.state}]\n`;
-        });
-        return summary.trim();
-      }
-
-      // Memory Store
-      if (tool === 'memory_store') {
-        const content = data.content || (typeof data === 'string' ? data : 'data');
-        return `✓ Stored in memory: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`;
-      }
-
-      // Memory Recall
-      if (tool === 'memory_recall') {
-        const content = data.content || (Array.isArray(data) ? data.map((m: any) => m.content).join('\n') : String(data));
-        return content;
-      }
-
-      // Default fallback
-      if (typeof data === 'object' && data !== null) {
-        return 'Completed successfully';
-      }
-      return String(data);
-    }
-
-    function summarizeForMemory(taskInput: string, result: any): string {
-      if (!result) return `Task completed: ${taskInput.substring(0, 100)}`;
-      
-      const data = (result && typeof result === 'object' && 'data' in result && result.data) 
-        ? result.data 
-        : result;
-
-      // Base64 / Garbage Detection
-      const isGarbage = (text: string) => {
-        if (!text || typeof text !== 'string') return false;
-        // Check for long strings without spaces or with high non-alpha ratio
-        const words = text.split(/\s+/);
-        const hasLongWord = words.some(w => w.length > 50);
-        const nonAlphaRatio = (text.match(/[^a-zA-Z0-9\s,.!?-]/g) || []).length / text.length;
-        return hasLongWord || nonAlphaRatio > 0.4;
-      };
-
-      // Gmail Fetch
-      if (data.messages && Array.isArray(data.messages)) {
-        const count = data.messages.length;
-        const recent = data.messages[0];
-        const from = recent?.sender || recent?.from || 'Unknown';
-        const subject = recent?.subject || '(No Subject)';
-        return `Fetched ${count} email${count > 1 ? 's' : ''}. Most recent from ${from} about "${subject}".`;
-      }
-
-      // Gmail Send
-      if (data.id || data.messageId) {
-        if (taskInput.toLowerCase().includes('send') || taskInput.toLowerCase().includes('email')) {
-          const toMatch = taskInput.match(/to\s+([^\s,]+)/i);
-          const to = toMatch ? toMatch[1] : 'recipient';
-          return `Sent email to ${to}${data.subject ? ` with subject "${data.subject}"` : ''}.`;
-        }
-      }
-
-      // GitHub
-      if (data.number && (data.html_url || data.url)) {
-        return `Created GitHub issue #${data.number}: "${data.title || 'Untitled'}"`;
-      }
-
-      // Fallback for simple answers
-      if (typeof data === 'string' && !isGarbage(data)) {
-        return `Question: ${taskInput}. Answer: ${data}`;
-      }
-
-      const summary = `Task completed: ${taskInput.substring(0, 100)}${taskInput.length > 100 ? '...' : ''}`;
-      return summary;
-    }
-
-    function normalizeStepResult(result: unknown): string {
-      if (!result) return '';
-      if (typeof result === 'string') return result;
-      if (typeof result === 'object' && result !== null) {
-        const obj = result as Record<string, unknown>;
-        return String(obj.answer || obj.message || obj.text || JSON.stringify(result));
-      }
-      return String(result);
-    }
+    // BUILT_IN_TOOLS list remains in function scope if needed or moved up.
+    // We already moved the functions up.
 
     for (const step of plan.steps) {
       const stepRecord = await createTaskStep(task.id, {

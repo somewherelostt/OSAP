@@ -1,3 +1,11 @@
+import { generatePlan } from '@/lib/glm';
+import { getContextForTaskWithKnowledge, storeMemory as hydraStoreMemory } from '@/lib/hydra';
+import { createMemoryNode } from '@/lib/database';
+import { summarizeForMemory } from '@/lib/executor-enhanced';
+import { executeTool } from '@/lib/tools-enhanced';
+import { executeComposioToolCall } from '@/lib/composio';
+import { DEFAULT_POLICY } from '@/lib/tool-categories';
+
 export type AgentStatus = 'idle' | 'planning' | 'executing' | 'paused' | 'completed' | 'failed';
 export type AgentPriority = 'low' | 'medium' | 'high' | 'critical';
 
@@ -182,9 +190,17 @@ export class AgentOrchestrator {
     return Array.from(this.agents.values());
   }
 
-  async think(agentId: string, context: ExecutionContext): Promise<AgentThought> {
+  async think(agentId: string, context: ExecutionContext, event?: string): Promise<AgentThought> {
     const agent = this.agents.get(agentId);
     if (!agent) throw new Error(`Agent ${agentId} not found`);
+
+    let memoryContext = '';
+    try {
+      const { memoryContext: memCtx, knowledgeContext: knowCtx } = await getContextForTaskWithKnowledge(context.input, context.userId);
+      memoryContext = [memCtx, knowCtx].filter(Boolean).join('\n\n');
+    } catch (e) {
+      console.warn('[Orchestrator] Failed to fetch context for thinking:', e);
+    }
 
     const thought: AgentThought = {
       id: generateId(),
@@ -195,47 +211,57 @@ export class AgentOrchestrator {
       confidence: 0,
     };
 
-    const prompt = this.buildThoughtPrompt(agent, context);
+    const prompt = this.buildThoughtPrompt(agent, context, memoryContext, event);
     
     try {
       const response = await this.callLLM(prompt);
-      Object.assign(thought, response);
+      thought.thought = (response.thought as string) || (event ? `Responding to ${event}` : 'Thinking about the goal');
+      thought.reasoning = (response.reasoning as string) || 'Analyzing current state and objectives';
+      thought.decision = (response.decision as string) || 'Proceed with current plan';
+      thought.confidence = typeof response.confidence === 'number' ? response.confidence : 0.8;
     } catch (error) {
-      thought.reasoning = `Error in reasoning: ${error instanceof Error ? error.message : 'Unknown'}`;
-      thought.confidence = 0;
+      thought.thought = 'Error in reasoning';
+      thought.reasoning = `AI call failed: ${error instanceof Error ? error.message : 'Unknown'}`;
+      thought.decision = 'Retry or abort';
+      thought.confidence = 0.1;
     }
 
     agent.thoughts.push(thought);
-    agent.updatedAt = new Date().toISOString();
+    if (agent.thoughts.length > 20) agent.thoughts.shift();
     
+    agent.updatedAt = new Date().toISOString();
     this.onThought?.(agentId, thought);
     
     return thought;
   }
 
-  private buildThoughtPrompt(agent: Agent, context: ExecutionContext): string {
-    const relevantMemories = this.getRelevantMemories(agent, context.input);
-    const memoryContext = relevantMemories.length > 0 
-      ? `\nRelevant past experiences:\n${relevantMemories.map(m => `- ${m.content} (success rate: ${m.successRate}%)`).join('\n')}`
-      : '';
+  private buildThoughtPrompt(agent: Agent, context: ExecutionContext, memoryContext: string, event?: string): string {
+    const status = agent.status;
+    const planProgress = agent.currentPlan 
+      ? `Current Plan Progress: ${agent.currentPlan.currentStepIndex + 1}/${agent.currentPlan.steps.length}`
+      : 'No active plan';
 
-    return `You are ${agent.config.name}, an autonomous agent with the following capabilities:
-${agent.config.capabilities.join(', ')}
+    const recentThoughts = agent.thoughts.slice(-3).map(t => `- ${t.thought}: ${t.decision}`).join('\n');
 
-Current objective: ${context.input}
-${memoryContext}
+    return `You are ${agent.config.name}, an autonomous agent.
+Status: ${status}
+Objective: ${context.input}
+${planProgress}
+${event ? `Recent Event: ${event}` : ''}
 
-Think through this step by step:
-1. What is the goal?
-2. What are the sub-tasks needed?
-3. What could go wrong?
-4. How will you measure success?
+${memoryContext ? `Relevant Context:\n${memoryContext}` : ''}
+${recentThoughts ? `Recent Reasoning:\n${recentThoughts}` : ''}
 
-Output your thought process, reasoning, and decision in JSON format:
+Think through this situation:
+1. What is the immediate next priority?
+2. Are there any risks or failures to address?
+3. How does this align with the overall objective?
+
+Output your thought process in JSON format:
 {
-  "thought": "What you're thinking about",
-  "reasoning": "Why you think this approach will work",
-  "decision": "What you've decided to do",
+  "thought": "Short summary of current state",
+  "reasoning": "Detailed reasoning for next step",
+  "decision": "Your immediate decision",
   "confidence": 0.0-1.0
 }`;
   }
@@ -248,52 +274,45 @@ Output your thought process, reasoning, and decision in JSON format:
     agent.updatedAt = new Date().toISOString();
     this.onStatusChange?.(agentId, 'planning');
 
-    const thought = await this.think(agentId, context);
+    await this.think(agentId, context, 'Starting planning phase');
     
+    let memoryContext = '';
+    try {
+      const { memoryContext: memCtx, knowledgeContext: knowCtx } = await getContextForTaskWithKnowledge(context.input, context.userId);
+      memoryContext = [memCtx, knowCtx].filter(Boolean).join('\n\n');
+    } catch (e) {
+      console.warn('[Orchestrator] Planning context fetch failed:', e);
+    }
+
     const plan: AgentPlan = {
       id: generateId(),
       objective: context.input,
       steps: [],
       currentStepIndex: 0,
       status: 'pending',
-      reasoning: thought.reasoning,
+      reasoning: 'Initializing plan based on objectives and context...',
     };
 
-    const stepsPrompt = `Based on your thought process, create a detailed execution plan.
-
-Objective: ${context.input}
-Reasoning: ${thought.reasoning}
-
-For each step provide:
-- action: what to do
-- input: what inputs are needed
-- expectedOutcome: what success looks like
-
-Output as JSON array of steps:
-[
-  {
-    "action": "action name",
-    "input": {"key": "value"},
-    "expectedOutcome": "description"
-  }
-]`;
-
     try {
-      const stepsResponse = await this.callLLM(stepsPrompt);
-      const steps = Array.isArray(stepsResponse.steps) ? stepsResponse.steps : [];
+      const result = await generatePlan(context.input, memoryContext);
       
-      plan.steps = steps.map((step: Record<string, unknown>, index: number) => ({
-        id: generateId(),
-        order: index + 1,
-        action: step.action as string || 'unknown',
-        input: (step.input as Record<string, unknown>) || {},
-        expectedOutcome: step.expectedOutcome as string || '',
+      if ('error' in result) {
+        throw new Error(result.error);
+      }
+
+      plan.steps = result.plan.steps.map((step, index) => ({
+        id: step.id || generateId(),
+        order: step.order || index + 1,
+        action: step.tool,
+        input: step.input || {},
+        expectedOutcome: step.description || '',
         status: 'pending',
         retryCount: 0,
         maxRetries: agent.config.maxRetries,
       }));
       
       plan.status = 'in_progress';
+      plan.reasoning = result.reasoning;
     } catch (error) {
       plan.status = 'failed';
       plan.steps = [{
