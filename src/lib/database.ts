@@ -1,10 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 import type { DbUser, DbTask, DbTaskStep, DbExecution, DbMemoryNode } from '@/types/database';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = supabaseUrl && supabaseKey 
+  ? createClient(supabaseUrl, supabaseKey)
+  : null;
+
+function getSupabase() {
+  if (!supabase) {
+    throw new Error('Supabase not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables.');
+  }
+  return supabase;
+}
 
 // Generate anonymous user ID (UUID v4)
 function generateAnonymousId(): string {
@@ -13,7 +22,7 @@ function generateAnonymousId(): string {
 
 // User operations
 export async function getUser(userId: string): Promise<DbUser | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('users')
     .select('*')
     .eq('id', userId)
@@ -24,7 +33,7 @@ export async function getUser(userId: string): Promise<DbUser | null> {
 }
 
 export async function getOrCreateUser(email: string): Promise<DbUser> {
-  const { data: existing } = await supabase
+  const { data: existing } = await getSupabase()
     .from('users')
     .select('*')
     .eq('email', email)
@@ -32,7 +41,7 @@ export async function getOrCreateUser(email: string): Promise<DbUser> {
   
   if (existing) return existing;
   
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('users')
     .insert({ email })
     .select()
@@ -46,7 +55,7 @@ export async function getOrCreateUser(email: string): Promise<DbUser> {
 export async function getOrCreateAnonymousUser(anonymousId: string): Promise<DbUser> {
   const email = `anon_${anonymousId}@osap.app`;
   
-  const { data: existing } = await supabase
+  const { data: existing } = await getSupabase()
     .from('users')
     .select('*')
     .eq('email', email)
@@ -54,7 +63,7 @@ export async function getOrCreateAnonymousUser(anonymousId: string): Promise<DbU
   
   if (existing) return existing;
   
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('users')
     .insert({ email })
     .select()
@@ -68,7 +77,7 @@ export async function getOrCreateAnonymousUser(anonymousId: string): Promise<DbU
 // Uses clerk_id column for direct lookup, falls back to email match
 export async function getOrCreateClerkUser(clerkUserId: string, email?: string): Promise<DbUser> {
   // First try to find by clerk_id directly
-  const { data: byClerkId } = await supabase
+  const { data: byClerkId } = await getSupabase()
     .from('users')
     .select('*')
     .eq('clerk_id', clerkUserId)
@@ -78,7 +87,7 @@ export async function getOrCreateClerkUser(clerkUserId: string, email?: string):
   
   // Fall back to email lookup if provided
   if (email) {
-    const { data: byEmail } = await supabase
+    const { data: byEmail } = await getSupabase()
       .from('users')
       .select('*')
       .eq('email', email)
@@ -86,7 +95,7 @@ export async function getOrCreateClerkUser(clerkUserId: string, email?: string):
     
     if (byEmail) {
       // Update the clerk_id if we found by email but not by clerk_id
-      const { data: updated, error: updateError } = await supabase
+      const { data: updated, error: updateError } = await getSupabase()
         .from('users')
         .update({ clerk_id: clerkUserId })
         .eq('id', byEmail.id)
@@ -106,7 +115,7 @@ export async function getOrCreateClerkUser(clerkUserId: string, email?: string):
   
   // Insert with explicit id generation - we'll use a placeholder UUID
   // This allows the user record to exist even without Supabase Auth linking
-  const { data: newUser, error: insertError } = await supabase
+  const { data: newUser, error: insertError } = await getSupabase()
     .from('users')
     .insert({
       clerk_id: clerkUserId,
@@ -117,7 +126,7 @@ export async function getOrCreateClerkUser(clerkUserId: string, email?: string):
   
   if (insertError) {
     // If insert fails (e.g. RLS), try upsert
-    const { data: upserted, error: upsertError } = await supabase
+    const { data: upserted, error: upsertError } = await getSupabase()
       .from('users')
       .upsert(
         { clerk_id: clerkUserId, email: userEmail },
@@ -143,7 +152,7 @@ export async function createTask(
   title: string,
   description?: string
 ): Promise<DbTask> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('tasks')
     .insert({
       user_id: userId,
@@ -163,7 +172,7 @@ export async function updateTask(
   taskId: string,
   updates: Partial<DbTask>
 ): Promise<DbTask> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('tasks')
     .update(updates)
     .eq('id', taskId)
@@ -175,7 +184,7 @@ export async function updateTask(
 }
 
 export async function getTask(taskId: string): Promise<DbTask | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('tasks')
     .select('*')
     .eq('id', taskId)
@@ -186,7 +195,7 @@ export async function getTask(taskId: string): Promise<DbTask | null> {
 }
 
 export async function getTasks(userId: string, limit = 50): Promise<DbTask[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('tasks')
     .select('*')
     .eq('user_id', userId)
@@ -198,7 +207,7 @@ export async function getTasks(userId: string, limit = 50): Promise<DbTask[]> {
 }
 
 export async function deleteTask(taskId: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('tasks')
     .delete()
     .eq('id', taskId);
@@ -211,7 +220,7 @@ export async function createTaskStep(
   taskId: string,
   step: Omit<DbTaskStep, 'id' | 'task_id' | 'created_at'>
 ): Promise<DbTaskStep> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('task_steps')
     .insert({
       task_id: taskId,
@@ -228,7 +237,7 @@ export async function updateTaskStep(
   stepId: string,
   updates: Partial<DbTaskStep>
 ): Promise<DbTaskStep> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('task_steps')
     .update(updates)
     .eq('id', stepId)
@@ -240,7 +249,7 @@ export async function updateTaskStep(
 }
 
 export async function getTaskSteps(taskId: string): Promise<DbTaskStep[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('task_steps')
     .select('*')
     .eq('task_id', taskId)
@@ -254,7 +263,7 @@ export async function getTaskSteps(taskId: string): Promise<DbTaskStep[]> {
 export async function logExecution(
   execution: Omit<DbExecution, 'id' | 'created_at'>
 ): Promise<DbExecution> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('executions')
     .insert(execution)
     .select()
@@ -268,7 +277,7 @@ export async function logExecution(
 export async function createMemoryNode(
   node: Omit<DbMemoryNode, 'id' | 'created_at' | 'updated_at'>
 ): Promise<DbMemoryNode> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('memory_nodes')
     .insert(node)
     .select()
@@ -303,7 +312,7 @@ export async function searchMemoryNodes(
   userId: string,
   searchQuery: string
 ): Promise<DbMemoryNode[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('memory_nodes')
     .select('*')
     .eq('user_id', userId)
@@ -319,7 +328,7 @@ export async function updateMemoryNode(
   nodeId: string,
   updates: Partial<DbMemoryNode>
 ): Promise<DbMemoryNode> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('memory_nodes')
     .update(updates)
     .eq('id', nodeId)
@@ -331,7 +340,7 @@ export async function updateMemoryNode(
 }
 
 export async function deleteMemoryNode(nodeId: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('memory_nodes')
     .delete()
     .eq('id', nodeId);
