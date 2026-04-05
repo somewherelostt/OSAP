@@ -205,7 +205,7 @@ export async function getComposioAuthUrl(
     const session = await getComposioSession(userId);
     
     const connectionRequest = await session.authorize(toolkit.toUpperCase(), {
-      callbackUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/composio/callback`,
+      callbackUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/composio-callback`,
     });
 
     const redirectUrl = (connectionRequest as any).redirectUrl || (connectionRequest as any).data?.redirectUrl || '';
