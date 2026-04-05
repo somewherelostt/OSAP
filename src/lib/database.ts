@@ -8,7 +8,7 @@ export const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey)
   : null;
 
-function getSupabase() {
+export function getSupabase() {
   if (!supabase) {
     throw new Error('Supabase not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables.');
   }
@@ -292,7 +292,7 @@ export async function getMemoryNodes(
   type?: string,
   limit = 50
 ): Promise<DbMemoryNode[]> {
-  let query = supabase
+  let query = getSupabase()
     .from('memory_nodes')
     .select('*')
     .eq('user_id', userId)

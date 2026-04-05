@@ -71,7 +71,7 @@ export const TOOL_CATEGORIES: Record<string, ToolCategory> = {
 
 export const DEFAULT_POLICY: CapabilityPolicy = {
   allowComposioSearch: true,
-  allowComposioExecute: false,
+  allowComposioExecute: true,
   allowWorkspace: false,
   allowedTools: [
     'search_memory',
@@ -90,7 +90,13 @@ export const DEFAULT_POLICY: CapabilityPolicy = {
 };
 
 export function getToolCategory(toolName: string): ToolCategory {
+  if (isComposioToolName(toolName)) return 'composio';
   return TOOL_CATEGORIES[toolName] || 'write';
+}
+
+export function isComposioToolName(name: string): boolean {
+  // Composio tools are typically all-caps with underscores: GMAIL_FETCH_EMAILS, GITHUB_CREATE_ISSUE
+  return typeof name === 'string' && /^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/.test(name);
 }
 
 export function isToolAllowed(
@@ -99,6 +105,13 @@ export function isToolAllowed(
 ): boolean {
   if (policy.blockedTools.includes(toolName)) return false;
   if (policy.allowedTools.includes(toolName)) return true;
-  if (policy.allowComposioExecute && toolName.startsWith('composio_')) return true;
+  
+  // Allow Composio tools if explicitly enabled in policy
+  if (policy.allowComposioExecute) {
+    if (toolName.startsWith('composio_') || isComposioToolName(toolName)) {
+      return true;
+    }
+  }
+  
   return false;
 }

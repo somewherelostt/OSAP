@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { ToolDefinition, ToolExecution } from '@/types/database';
-import { getToolCategory, type CapabilityPolicy, type ToolCategory } from './tool-categories';
+import { getToolCategory, isComposioToolName, type CapabilityPolicy, type ToolCategory } from './tool-categories';
 import { searchTools, executeComposioToolCall, createComposioMetaTools } from './composio';
 
 export interface ToolResult {
@@ -241,6 +241,23 @@ export async function executeTool(
   }
   
   if (!tool) {
+    // If tool is not in registry, check if it's a Composio tool (ALL_CAPS_WITH_UNDERSCORES)
+    if (isComposioToolName(toolName)) {
+      // Direct execution via Composio if policy allows
+      if (policy && !isToolAllowed(toolName, policy)) {
+        return { success: false, error: `Tool not permitted: ${toolName}` };
+      }
+      
+      const result = await executeComposioToolCall(userId, { name: toolName, parameters: input });
+      return {
+        ...result,
+        executionId: `${toolName}-${Date.now()}`,
+        durationMs: Date.now() - startTime,
+        toolName,
+        category: 'composio',
+      };
+    }
+    
     return { success: false, error: `Tool not found: ${toolName}` };
   }
   
