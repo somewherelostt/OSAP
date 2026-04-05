@@ -26,6 +26,12 @@ import {
   Clock,
   Loader2,
   Check,
+  Link2,
+  Globe,
+  MessageSquare,
+  Calendar,
+  X,
+  Database,
 } from 'lucide-react';
 
 interface UserStats {
@@ -123,6 +129,9 @@ export default function ProfilePage() {
   });
   const [emailPrefsLoading, setEmailPrefsLoading] = useState(false);
   const [accentColor, setAccentColor] = useState<string>('#8b5cf6');
+  const [connectedApps, setConnectedApps] = useState<{ connected: string[]; available: string[] }>({ connected: [], available: [] });
+  const [appsLoading, setAppsLoading] = useState(false);
+  const [connectingApp, setConnectingApp] = useState<string | null>(null);
 
   const fetchStats = useCallback(async () => {
     if (!user?.id) return;
@@ -173,11 +182,32 @@ export default function ProfilePage() {
     }
   }, []);
 
+  const fetchConnectedApps = useCallback(async () => {
+    try {
+      const res = await fetch('/api/composio/status');
+      if (!res.ok) return;
+      const data = await res.json();
+      setConnectedApps({ connected: data.connected || [], available: data.available || [] });
+    } catch (error) {
+      console.error('[Profile] Error fetching connected apps:', error);
+    }
+  }, []);
+
   useEffect(() => {
     if (isLoaded && user?.id) {
-      Promise.all([fetchStats(), fetchEmailPreferences()]).finally(() => setLoading(false));
+      Promise.all([fetchStats(), fetchEmailPreferences(), fetchConnectedApps()]).finally(() => setLoading(false));
     }
-  }, [isLoaded, user?.id, fetchStats, fetchEmailPreferences]);
+  }, [isLoaded, user?.id, fetchStats, fetchEmailPreferences, fetchConnectedApps]);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'COMPOSIO_CONNECTED') {
+        fetchConnectedApps();
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [fetchConnectedApps]);
 
   useEffect(() => {
     const saved = localStorage.getItem('osap-accent-color');
@@ -218,6 +248,32 @@ export default function ProfilePage() {
   const handleSignOut = async () => {
     await signOut();
     router.push('/');
+  };
+
+  const handleConnectApp = async (toolkit: string) => {
+    setConnectingApp(toolkit);
+    try {
+      const res = await fetch(`/api/composio/connect?toolkit=${toolkit}`);
+      if (!res.ok) throw new Error('Failed to get auth URL');
+      const data = await res.json();
+      if (data.authUrl) {
+        window.open(data.authUrl, '_blank', 'width=600,height=700');
+        setTimeout(() => fetchConnectedApps(), 5000);
+      }
+    } catch (error) {
+      console.error('[Profile] Error connecting app:', error);
+    } finally {
+      setConnectingApp(null);
+    }
+  };
+
+  const handleDisconnectApp = async (toolkit: string) => {
+    try {
+      await fetch(`/api/composio/connect?toolkit=${toolkit}`, { method: 'DELETE' });
+      fetchConnectedApps();
+    } catch (error) {
+      console.error('[Profile] Error disconnecting app:', error);
+    }
   };
 
   const toggleSection = (id: string) => {
@@ -322,6 +378,64 @@ export default function ProfilePage() {
         <Card className="p-4 rounded-2xl border-border/50 bg-card text-center">
           <p className="text-2xl font-bold">{stats.activeTime}</p>
           <p className="text-xs text-muted-foreground">Active Time</p>
+        </Card>
+      </div>
+
+      <div id="connected-apps" className="space-y-3">
+        <SectionHeader title="Connected Apps" />
+        <Card className="p-4 rounded-2xl border-border/50 bg-card">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {[
+              { id: 'gmail', name: 'Gmail', icon: Mail, color: 'bg-red-500' },
+              { id: 'github', name: 'GitHub', icon: Globe, color: 'bg-gray-800' },
+              { id: 'slack', name: 'Slack', icon: MessageSquare, color: 'bg-purple-600' },
+              { id: 'googlecalendar', name: 'Google Calendar', icon: Calendar, color: 'bg-blue-500' },
+              { id: 'twitter', name: 'Twitter / X', icon: X, color: 'bg-sky-500' },
+              { id: 'notion', name: 'Notion', icon: Database, color: 'bg-black' },
+            ].map((app) => {
+              const isConnected = connectedApps.connected.includes(app.id);
+              const isLoading = connectingApp === app.id;
+              return (
+                <div key={app.id} className="flex items-center gap-3 p-3 rounded-xl border border-border/50 bg-muted/30">
+                  <div className={`size-9 rounded-lg ${app.color} flex items-center justify-center shrink-0`}>
+                    <app.icon className="size-4 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{app.name}</p>
+                    {isConnected ? (
+                      <p className="text-xs text-green-500">Connected</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Not connected</p>
+                    )}
+                  </div>
+                  {isConnected ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-xs text-destructive hover:text-destructive h-7 px-2"
+                      onClick={() => handleDisconnectApp(app.id)}
+                    >
+                      Disconnect
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7 px-2"
+                      onClick={() => handleConnectApp(app.id)}
+                      disabled={isLoading || appsLoading}
+                    >
+                      {isLoading ? <Loader2 className="size-3 animate-spin" /> : 'Connect'}
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-3 p-3 rounded-lg bg-muted/50 text-xs text-muted-foreground">
+            <Link2 className="size-3 inline mr-1" />
+            Connect your apps so your AI agent can fetch emails, create GitHub issues, send messages, and more. Once connected, just ask naturally — &quot;fetch my last 2 emails&quot; or &quot;create a GitHub issue&quot;.
+          </div>
         </Card>
       </div>
 

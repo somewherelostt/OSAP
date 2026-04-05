@@ -26,6 +26,7 @@ import {
   recallKnowledge,
   isHydraConfigured,
 } from './hydra';
+import { executeComposioToolCall } from './composio';
 
 initializeTools();
 
@@ -91,6 +92,27 @@ export async function createAndExecuteTask(
 
     const stepResults = [];
     let hasFailure = false;
+    const BUILT_IN_TOOLS = ['memory_store', 'memory_recall', 'http_request', 'github_create_issue', 'github_get_issues', 'email_send', 'twitter_post', 'composio_search_tools', 'composio_execute_tool'];
+
+    function normalizeStepResult(result: unknown): string {
+      if (!result) return '';
+      if (typeof result === 'string') return result;
+      if (Array.isArray(result)) {
+        return result.map(item => normalizeStepResult(item)).join('\n');
+      }
+      if (typeof result === 'object') {
+        const obj = result as Record<string, unknown>;
+        if (obj.text) return String(obj.text);
+        if (obj.message) return String(obj.message);
+        if (obj.body) return String(obj.body);
+        if (obj.content) return String(obj.content);
+        if (obj.html) return String(obj.html);
+        if (obj.data) return normalizeStepResult(obj.data);
+        if (obj.response) return normalizeStepResult(obj.response);
+        return JSON.stringify(result, null, 2);
+      }
+      return String(result);
+    }
 
     for (const step of plan.steps) {
       const stepRecord = await createTaskStep(task.id, {
@@ -102,7 +124,22 @@ export async function createAndExecuteTask(
 
       try {
         await updateTaskStep(stepRecord.id, { status: 'running' });
-        const result = await executeTool(step.tool, step.input || {}, internalUserId, DEFAULT_POLICY);
+        
+        let result: ToolResult;
+        
+        if (BUILT_IN_TOOLS.includes(step.tool)) {
+          result = await executeTool(step.tool, step.input || {}, internalUserId, DEFAULT_POLICY);
+        } else {
+          const composioResult = await executeComposioToolCall(internalUserId, {
+            name: step.tool,
+            parameters: step.input || {},
+          });
+          result = {
+            success: composioResult.success,
+            data: composioResult.data,
+            error: composioResult.error,
+          };
+        }
         
         if (result.success) {
           await updateTaskStep(stepRecord.id, { 
@@ -132,17 +169,15 @@ export async function createAndExecuteTask(
     const directAnswer = plan.answer || null;
     const stepOutputs = stepResults
       .filter(s => s.status === 'success' && s.result)
-      .map(s => {
-        // Try to extract answer from memory_store result
-        const data = s.result as Record<string, unknown>;
-        return data?.text || data?.result || data?.answer || s.result;
-      })
+      .map(s => normalizeStepResult(s.result))
       .filter(Boolean);
 
+    const finalAnswer = directAnswer || stepOutputs[0] || null;
+    
     const finalResult = {
-      answer: directAnswer || stepOutputs[0] || null,
-      summary: directAnswer
-        ? `${input} = ${directAnswer}`
+      answer: finalAnswer,
+      summary: finalAnswer
+        ? String(finalAnswer)
         : `Completed ${stepResults.length} steps`,
       steps: stepResults,
     };

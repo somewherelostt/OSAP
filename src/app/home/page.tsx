@@ -21,6 +21,11 @@ import {
   AlertCircle,
   LogIn,
   Brain,
+  Copy,
+  Link2,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import type { DbTask, DbMemoryNode } from '@/types/database';
 
@@ -55,6 +60,13 @@ export default function HomePage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
+
+  const examplePrompts = [
+    { text: 'Fetch my last 2 emails', query: 'Fetch my last 2 emails' },
+    { text: 'What is the capital of France?', query: 'What is the capital of France?' },
+    { text: "Create a GitHub issue titled 'Test from OSAP'", query: "Create a GitHub issue titled 'Test from OSAP'" },
+  ];
 
   const fetchData = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -149,6 +161,52 @@ export default function HomePage() {
     return 'Good evening';
   };
 
+  const toggleTaskExpand = (taskId: string) => {
+    setExpandedTasks(prev => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
+
+  const isNotConnectedError = (error: string | undefined): boolean => {
+    if (!error) return false;
+    const lower = error.toLowerCase();
+    return lower.includes('not connected') || 
+           lower.includes('no connected account') || 
+           lower.includes('active connection') ||
+           lower.includes('connection') ||
+           lower.includes('unauthorized') ||
+           lower.includes('oauth') ||
+           lower.includes('4302');
+  };
+
+  const formatResult = (result: unknown): string => {
+    if (!result) return 'Completed';
+    if (typeof result === 'string') return result;
+    if (Array.isArray(result)) {
+      return result.map((item, i) => {
+        if (typeof item === 'object' && item !== null) {
+          return JSON.stringify(item, null, 2);
+        }
+        return String(item);
+      }).join('\n');
+    }
+    if (typeof result === 'object') {
+      return JSON.stringify(result, null, 2);
+    }
+    return String(result);
+  };
+
+  const copyResult = (task: Task) => {
+    const result = task.result as Record<string, unknown> | null;
+    const answer = result?.answer as string | null | undefined;
+    const summary = result?.summary as string | null | undefined;
+    const text = answer || summary || formatResult(result) || 'Completed';
+    navigator.clipboard.writeText(text).catch(() => {});
+  };
+
   const firstName = clerkUser?.firstName || 'there';
 
   if (!isAuthLoaded) {
@@ -192,6 +250,26 @@ export default function HomePage() {
           <div className="flex items-center gap-2 text-sm text-destructive px-1">
             <AlertCircle className="size-4" />
             {submitError}
+          </div>
+        )}
+        {isAuthenticated && (
+          <div className="flex flex-wrap gap-2 items-center mt-2">
+            <span className="text-xs text-muted-foreground">Try:</span>
+            {examplePrompts.map((prompt) => (
+              <button
+                key={prompt.text}
+                onClick={() => {
+                  const input = document.querySelector('input[data-command-input]') as HTMLInputElement;
+                  if (input) {
+                    input.value = prompt.text;
+                    input.focus();
+                  }
+                }}
+                className="text-xs px-2 py-1 rounded-full bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors border border-border/50"
+              >
+                {prompt.text}
+              </button>
+            ))}
           </div>
         )}
       </div>
@@ -261,13 +339,15 @@ export default function HomePage() {
               ) : (
                 tasks.slice(0, 5).map((task) => {
                   const taskResult = task.result as Record<string, unknown> | null;
+                  const steps = taskResult?.steps as Array<{ step?: { tool?: string; description?: string }; result?: unknown; status?: string; error?: string }> | null;
+                  const isExpanded = expandedTasks.has(task.id);
+                  const isNotConnected = task.status === 'failed' && isNotConnectedError(task.error);
+
                   return (
                     <div key={task.id} className="space-y-1">
-                      <ListItem
-                        title={task.title || task.input.substring(0, 50) + (task.input.length > 50 ? '...' : '')}
-                        description={task.error || formatTimeAgo(task.created_at)}
-                        leftElement={
-                          task.status === 'success' ? (
+                      <div className="flex items-center gap-2">
+                        <div className="shrink-0">
+                          {task.status === 'success' ? (
                             <CheckCircle2 className="size-4 text-green-500" />
                           ) : task.status === 'failed' ? (
                             <AlertCircle className="size-4 text-red-500" />
@@ -275,19 +355,77 @@ export default function HomePage() {
                             <Loader2 className="size-4 text-blue-500 animate-spin" />
                           ) : (
                             <Clock className="size-4 text-muted-foreground" />
-                          )
-                        }
-                        rightElement={
+                          )}
+                        </div>
+                        <button
+                          className="flex-1 text-left min-w-0"
+                          onClick={() => window.location.href = `/tasks?id=${task.id}`}
+                        >
+                          <p className="text-sm font-medium truncate">
+                            {task.title || task.input.substring(0, 50) + (task.input.length > 50 ? '...' : '')}
+                          </p>
                           <div className="flex items-center gap-2">
-                            <StatusBadge status={task.status} />
+                            <p className="text-xs text-muted-foreground">
+                              {task.error ? (
+                                <span className="text-red-500">{task.error.substring(0, 60)}{task.error.length > 60 ? '...' : ''}</span>
+                              ) : formatTimeAgo(task.created_at)}
+                            </p>
+                            {isNotConnected && (
+                              <a
+                                href="/profile#connected-apps"
+                                className="text-xs text-blue-500 hover:underline flex items-center gap-1"
+                              >
+                                <Link2 className="size-3" />
+                                Connect App
+                              </a>
+                            )}
                           </div>
-                        }
-                        onClick={() => window.location.href = `/tasks?id=${task.id}`}
-                      />
+                        </button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {(task.status === 'success' || task.status === 'failed') && (
+                            <button
+                              onClick={() => copyResult(task)}
+                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                              title="Copy result"
+                            >
+                              <Copy className="size-3" />
+                            </button>
+                          )}
+                          {task.status === 'success' && taskResult && (
+                            <button
+                              onClick={() => toggleTaskExpand(task.id)}
+                              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                              title={isExpanded ? 'Collapse' : 'Expand'}
+                            >
+                              {isExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                            </button>
+                          )}
+                          <StatusBadge status={task.status} />
+                        </div>
+                      </div>
                       {task.status === 'success' && taskResult && (
-                        <p style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '4px', marginLeft: '40px' }}>
-                          {`→ ${taskResult.answer || taskResult.summary || 'Completed'}`}
-                        </p>
+                        <div className="ml-6 space-y-1">
+                          {taskResult.answer !== undefined && taskResult.answer !== null && (
+                            <p className="text-xs text-foreground bg-muted/30 rounded px-2 py-1 font-mono whitespace-pre-wrap break-words">
+                              {String(taskResult.answer).substring(0, 200)}{String(taskResult.answer).length > 200 ? '...' : ''}
+                            </p>
+                          )}
+                          {isExpanded && steps && steps.length > 0 && (
+                            <div className="space-y-1 pl-2 border-l border-border">
+                              {steps.map((s, i) => (
+                                <div key={i} className="text-xs">
+                                  <span className="text-muted-foreground">{s.step?.tool || `Step ${i + 1}`}</span>
+                                  {s.status === 'failed' && (
+                                    <span className="text-red-500 ml-1">— {s.error?.substring(0, 50) || 'failed'}</span>
+                                  )}
+                                  {s.status === 'success' && s.result !== undefined && s.result !== null && (
+                                    <span className="text-green-500 ml-1">— Done</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   );

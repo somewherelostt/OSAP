@@ -28,30 +28,38 @@ function isComposioConfigured(): boolean {
   return !!process.env.COMPOSIO_API_KEY;
 }
 
-function getClient() {
+const sessionCache = new Map<string, any>();
+const clientCache = new Map<string, any>();
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getClient(): any {
   if (!isComposioConfigured()) {
     throw new Error('COMPOSIO_API_KEY not configured');
   }
-  const { Composio } = require('@composio/core');
-  return new Composio({ apiKey: process.env.COMPOSIO_API_KEY! });
+  
+  const cacheKey = 'default';
+  if (!clientCache.has(cacheKey)) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Composio } = require('@composio/core');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    clientCache.set(cacheKey, new Composio({ apiKey: process.env.COMPOSIO_API_KEY! }));
+  }
+  return clientCache.get(cacheKey)!;
 }
-
-const sessionCache = new Map<string, ReturnType<ReturnType<typeof getClient>['createSession']>>();
 
 export async function getComposioSession(userId: string) {
   if (!isComposioConfigured()) {
     throw new Error('COMPOSIO_API_KEY not configured');
   }
 
-  const { Composio } = await import('@composio/core');
-  const client = new Composio({ apiKey: process.env.COMPOSIO_API_KEY! });
-
-  if (!sessionCache.has(userId)) {
-    const session = await client.createSession({ entityId: userId });
-    sessionCache.set(userId, session);
+  if (sessionCache.has(userId)) {
+    return sessionCache.get(userId)!;
   }
 
-  return sessionCache.get(userId)!;
+  const client = getClient();
+  const session = await client.create(userId, { manageConnections: true });
+  sessionCache.set(userId, session);
+  return session;
 }
 
 export async function getComposioTools(userId: string): Promise<ComposioTool[]> {
@@ -64,10 +72,15 @@ export async function getComposioTools(userId: string): Promise<ComposioTool[]> 
     const session = await getComposioSession(userId);
     const tools = await session.tools();
     
+    if (!tools || !Array.isArray(tools)) {
+      return [];
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return tools.map((tool: any) => ({
-      name: tool.name,
-      description: tool.description || `Execute ${tool.name}`,
-      inputSchema: tool.parameters || {},
+      name: tool.name || tool.function?.name || String(tool),
+      description: tool.description || `Execute tool`,
+      inputSchema: tool.parameters || tool.function?.parameters || {},
       enabled: true,
       connected: true,
     }));
@@ -80,7 +93,7 @@ export async function getComposioTools(userId: string): Promise<ComposioTool[]> 
 export async function executeComposioToolCall(
   userId: string,
   toolCall: { name: string; parameters: Record<string, unknown> }
-): Promise<{ success: boolean; data?: unknown; error?: string }> {
+): Promise<{ success: boolean; data?: unknown; error: string }> {
   if (!isComposioConfigured()) {
     return { success: false, error: 'Composio not configured' };
   }
@@ -88,27 +101,47 @@ export async function executeComposioToolCall(
   try {
     const session = await getComposioSession(userId);
     
-    const result = await session.tools.execute({
-      name: toolCall.name,
-      parameters: toolCall.parameters,
-    });
+    const result = await session.execute(toolCall.name, toolCall.parameters);
 
-    return { success: true, data: result };
+    return { success: true, data: result, error: '' };
   } catch (error: any) {
     console.error(`[Composio] Tool execution failed for ${toolCall.name}:`, error);
     
-    const errorMessage = error?.message || String(error);
+    let errorMessage = error?.message || String(error);
+    
+    try {
+      if (typeof error === 'object' && error !== null) {
+        if (error?.error?.error?.message) {
+          errorMessage = error.error.error.message;
+        } else if (error?.error?.message) {
+          errorMessage = error.error.message;
+        } else if (error?.message) {
+          errorMessage = error.message;
+        }
+      } else if (errorMessage.startsWith('{')) {
+        const parsed = JSON.parse(errorMessage);
+        if (parsed?.error?.message) {
+          errorMessage = parsed.error.message;
+        } else if (parsed?.message) {
+          errorMessage = parsed.message;
+        }
+      }
+    } catch {}
+    
     const isNotConnected = 
       errorMessage.includes('no connected account') ||
       errorMessage.includes('not connected') ||
       errorMessage.includes('authentication') ||
-      errorMessage.includes('OAuth');
+      errorMessage.includes('OAuth') ||
+      errorMessage.includes('UNAUTHORIZED') ||
+      errorMessage.includes('4302') ||
+      errorMessage.includes('403');
     
     return {
       success: false,
       error: isNotConnected 
-        ? `${toolCall.name} failed: ${errorMessage}. User needs to connect their ${getAppNameFromTool(toolCall.name)} account in Profile → Connected Apps.`
-        : errorMessage,
+        ? `${getAppNameFromTool(toolCall.name)} not connected — Connect in Profile → Connected Apps to enable this action`
+        : errorMessage.substring(0, 200),
     };
   }
 }
@@ -127,8 +160,9 @@ function getAppNameFromTool(toolName: string): string {
     SALESFORCE: 'Salesforce',
   };
   
+  const upper = toolName.toUpperCase();
   for (const [app, name] of Object.entries(appMap)) {
-    if (toolName.toUpperCase().includes(app)) {
+    if (upper.includes(app)) {
       return name;
     }
   }
@@ -145,9 +179,11 @@ export async function testComposioConnection(): Promise<{
   }
 
   try {
-    const session = await getComposioSession('test_connection');
+    const { Composio } = await import('@composio/core');
+    const client = new Composio({ apiKey: process.env.COMPOSIO_API_KEY! });
+    const session = await client.create('test_connection', { manageConnections: true });
     const tools = await session.tools();
-    return { success: true, toolCount: tools.length };
+    return { success: true, toolCount: Array.isArray(tools) ? tools.length : 0 };
   } catch (error: any) {
     return { 
       success: false, 
@@ -166,16 +202,19 @@ export async function getComposioAuthUrl(
   }
 
   try {
-    const { Composio } = await import('@composio/core');
-    const client = new Composio({ apiKey: process.env.COMPOSIO_API_KEY! });
-
     const session = await getComposioSession(userId);
     
-    const authUrl = await session.appAccount.getConnectionUrl({
-      app: toolkit.toUpperCase(),
+    const connectionRequest = await session.authorize(toolkit.toUpperCase(), {
+      callbackUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/composio/callback`,
     });
 
-    return { authUrl };
+    const redirectUrl = (connectionRequest as any).redirectUrl || (connectionRequest as any).data?.redirectUrl || '';
+    
+    if (!redirectUrl) {
+      return { authUrl: '', error: 'No redirect URL returned from Composio' };
+    }
+
+    return { authUrl: redirectUrl };
   } catch (error: any) {
     console.error(`[Composio] Failed to get auth URL for ${toolkit}:`, error);
     return { 
@@ -197,12 +236,35 @@ export async function getComposioConnectionStatus(
 
   try {
     const session = await getComposioSession(userId);
+    const client = getClient();
     
-    const accounts = await session.connectedAccounts.list();
+    let connected: string[] = [];
     
-    const connected = accounts
-      .map((acc: any) => acc.app?.toLowerCase?.() || acc.appName?.toLowerCase?.() || '')
-      .filter(Boolean);
+    // Try session.toolkits() first - returns { items: [...], nextCursor, totalPages }
+    try {
+      const toolkitsResult = await session.toolkits();
+      if (toolkitsResult?.items && Array.isArray(toolkitsResult.items)) {
+        connected = toolkitsResult.items
+          .filter((t: any) => t.connection?.isActive)
+          .map((t: any) => (t.slug || t.name || '').toLowerCase())
+          .filter(Boolean);
+      }
+    } catch (tErr) {
+      // Try client.connectedAccounts.list as fallback
+      try {
+        const accountsResult = await (client.connectedAccounts as any).list({ user_ids: [userId] });
+        if (accountsResult?.items && Array.isArray(accountsResult.items)) {
+          connected = accountsResult.items
+            .map((acc: any) => {
+              const slug = acc.toolkit?.slug || acc.app;
+              return slug ? slug.toLowerCase() : '';
+            })
+            .filter(Boolean);
+        }
+      } catch (aErr) {
+        // silently fail
+      }
+    }
 
     const allApps = ['gmail', 'github', 'slack', 'googlecalendar', 'twitter', 'notion', 'linear', 'jira'];
     const available = allApps.filter(app => !connected.includes(app));
@@ -224,17 +286,29 @@ export async function disconnectComposioApp(
 
   try {
     const session = await getComposioSession(userId);
+    const client = getClient();
     
-    const accounts = await session.connectedAccounts.list();
-    const account = accounts.find(
-      (acc: any) => {
-        const app = acc.app?.toLowerCase?.() || acc.appName?.toLowerCase?.() || '';
-        return app === toolkit.toLowerCase();
-      }
-    );
+    // Try client.connectedAccounts.delete first (uses user_ids filter)
+    try {
+      const accountsResult = await (client.connectedAccounts as any).list({ 
+        user_ids: [userId],
+        toolkit_slugs: [toolkit.toLowerCase()]
+      });
+      const account = (accountsResult.items || []).find((acc: any) => {
+        const slug = (acc.toolkit?.slug || acc.app || '').toLowerCase();
+        return slug === toolkit.toLowerCase();
+      });
 
-    if (account) {
-      await account.disconnect();
+      if (account?.id) {
+        await (client.connectedAccounts as any).delete(account.id);
+      }
+    } catch (e) {
+      // Try toolkit disable as fallback
+      try {
+        await session.toolkits({ disable: [toolkit.toUpperCase()] });
+      } catch (tErr) {
+        // silently fail
+      }
     }
 
     return { success: true };
@@ -255,19 +329,20 @@ export async function searchTools(
   try {
     const { Composio } = await import('@composio/core');
     const client = new Composio({ apiKey: process.env.COMPOSIO_API_KEY! });
+    const session = await client.create('search_user');
     
-    const results = await client.tools.search({ query });
-    const resultArray = Array.isArray(results) ? results : [];
-
+    const results = await session.search({ query, toolkits: [] });
+    
+    const items = (results as any).items || [];
     return {
-      tools: resultArray.slice(0, limit).map((tool: any) => ({
-        name: tool.name,
-        description: tool.description || `Execute ${tool.name}`,
-        inputSchema: tool.parameters || {},
+      tools: items.slice(0, limit).map((tool: any) => ({
+        name: tool.name || tool.toolSlug || String(tool),
+        description: tool.description || `Execute ${tool.name || tool.toolSlug}`,
+        inputSchema: {},
         enabled: true,
         connected: true,
       })),
-      total: resultArray.length,
+      total: items.length,
       query,
     };
   } catch (error) {
@@ -322,23 +397,4 @@ export function createComposioMetaTools(): ToolDefinition[] {
       },
     },
   ];
-}
-
-export async function initializeComposio(integrations: string[]): Promise<void> {
-  if (!isComposioConfigured()) {
-    console.log('[Composio] No API key configured, skipping initialization');
-    return;
-  }
-
-  try {
-    const { Composio } = await import('@composio/core');
-    const client = new Composio({ apiKey: process.env.COMPOSIO_API_KEY! });
-    
-    for (const integration of integrations) {
-      await client.integrations.get({ integrationId: integration });
-    }
-    console.log('[Composio] Initialized with integrations:', integrations);
-  } catch (error) {
-    console.error('[Composio] Initialization failed:', error);
-  }
 }

@@ -55,29 +55,44 @@ export async function generatePlan(
     return { error: 'GLM_API_KEY not configured' };
   }
 
-  const systemPrompt = `You are a task planning AI. For the given task, generate a JSON execution plan.
+  const systemPrompt = `You are a task planning AI. Generate a JSON execution plan for the given task.
+Return ONLY valid JSON, no markdown fences, no explanation.
 
-IMPORTANT RULES:
-- If the task is a simple question or calculation (like "2+2", "what is the capital of France"), compute the answer yourself and put it in the memory_store params as "content" AND also add an "answer" field at the top level of the JSON.
-- If the task requires external actions (GitHub, email, HTTP), use the appropriate tool.
-- Return ONLY valid JSON, no markdown fences, no explanation.
-
-Return this exact shape:
+Format:
 {
-  "goal": "string",
-  "answer": "the direct answer if this is a question or calculation, otherwise null",
+  "goal": "string describing the overall goal",
+  "answer": "direct answer if this is a simple question, otherwise null",
   "steps": [
     {
       "id": "step_1",
-      "description": "string",
+      "order": 1,
       "tool": "tool_name",
-      "input": {}
+      "input": { "param": "value" },
+      "description": "what this step does",
+      "depends_on": []
     }
   ]
 }
 
-Available tools: github_create_issue, github_list_issues, http_request, memory_store, memory_recall, email_send, twitter_post, web_search.
-For simple questions and calculations, use memory_store with the answer as the content param.`;
+Built-in tools (use these directly, no auth needed):
+- memory_store: { content: string } — store something in memory
+- memory_recall: { query: string } — search memory
+- http_request: { url: string, method: string, body?: object } — make HTTP request
+
+Composio tools (use these for external services, requires user auth):
+- GMAIL_FETCH_EMAILS: { max_results: number, query?: string } — fetch emails from Gmail
+- GMAIL_SEND_EMAIL: { to: string, subject: string, body: string } — send email
+- GMAIL_GET_EMAIL_BY_ID: { message_id: string } — get specific email
+- GITHUB_CREATE_ISSUE: { owner: string, repo: string, title: string, body?: string }
+- GITHUB_LIST_ISSUES: { owner: string, repo: string, state?: string }
+- GITHUB_GET_PULL_REQUESTS: { owner: string, repo: string }
+- SLACK_SEND_MESSAGE: { channel: string, text: string }
+- TWITTER_CREATE_TWEET: { text: string }
+- GOOGLECALENDAR_LIST_EVENTS: { max_results?: number }
+- GOOGLECALENDAR_CREATE_EVENT: { summary: string, start: string, end: string }
+
+For tasks involving email, calendar, GitHub, Slack, Twitter — use Composio tools.
+For simple questions — answer directly in the "answer" field with no steps or a single memory_store step.`;
 
   const userInput = input;
   const userContext = '';
@@ -171,7 +186,7 @@ export interface AnalyzeInputInput {
 }
 
 export interface AnalyzeIntentOutput {
-  intent: 'task_create' | 'task_query' | 'memory_store' | 'memory_recall' | 'unknown';
+  intent: 'task_create' | 'task_query' | 'memory_store' | 'memory_recall' | 'composio_tool' | 'unknown';
   entities: Record<string, string>;
   confidence: number;
 }
@@ -185,7 +200,7 @@ export async function analyzeIntent(
 
   const systemPrompt = `Analyze user input and determine their intent. Output JSON:
 {
-  "intent": "task_create|task_query|memory_store|memory_recall|unknown",
+  "intent": "task_create|task_query|memory_store|memory_recall|composio_tool|unknown",
   "entities": {"key": "value"},
   "confidence": 0.0-1.0
 }
@@ -195,6 +210,7 @@ Intents:
 - task_query: User is asking about tasks
 - memory_store: User wants to store information
 - memory_recall: User wants to recall stored information
+- composio_tool: User wants to use an external service (Gmail, GitHub, Slack, Twitter, Google Calendar, etc.)
 - unknown: Cannot determine intent`;
 
   try {
