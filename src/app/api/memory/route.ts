@@ -6,6 +6,7 @@ import {
   storeMemory, 
   getMemoryStats, 
   getOrCreateClerkUser,
+  deleteMemoryNode,
 } from '@/lib/database';
 import { recallMemories, isHydraConfigured } from '@/lib/hydra';
 import type { DbMemoryNode } from '@/types/database';
@@ -69,7 +70,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Sort newest first
-    memories.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    memories.sort((a, b) => {
+      const dateA = new Date(a.createdAt).getTime();
+      const dateB = new Date(b.createdAt).getTime();
+      return dateB - dateA;
+    });
 
     const stats = await getMemoryStats(userIdToUse);
 
@@ -115,6 +120,31 @@ export async function POST(request: NextRequest) {
     console.error('[API] Memory store error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to store memory' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ error: 'Missing memory ID' }, { status: 400 });
+    }
+
+    await deleteMemoryNode(id);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('[API] Memory delete error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to delete memory' },
       { status: 500 }
     );
   }

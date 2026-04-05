@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
@@ -14,7 +14,7 @@ import {
   Plus,
   Brain,
   Clock,
-  FileText,
+  Pin,
   Heart,
   Lightbulb,
   Sparkles,
@@ -24,40 +24,65 @@ import {
   ExternalLink,
   BookOpen,
   Inbox,
+  Trash2,
+  MessageSquare,
+  CheckCircle,
+  Send,
+  AlertCircle,
+  MoreVertical,
 } from 'lucide-react';
 import type { DbMemoryNode } from '@/types/database';
 import { useAuth } from '@/lib/use-auth';
+import { cn } from '@/lib/utils';
 
 const typeConfig = {
   fact: {
     label: 'Fact',
-    icon: FileText,
-    color: 'text-blue-500 bg-blue-500/10 border-blue-500/20',
+    icon: Pin,
+    color: 'text-blue-500',
+    bg: 'bg-blue-500/10',
+    border: 'border-blue-500/30',
+    accent: 'border-l-blue-500',
   },
   preference: {
     label: 'Preference',
     icon: Heart,
-    color: 'text-pink-500 bg-pink-500/10 border-pink-500/20',
+    color: 'text-purple-500',
+    bg: 'bg-purple-500/10',
+    border: 'border-purple-500/30',
+    accent: 'border-l-purple-500',
   },
   context: {
     label: 'Context',
     icon: Lightbulb,
-    color: 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20',
+    color: 'text-amber-500',
+    bg: 'bg-amber-500/10',
+    border: 'border-amber-500/30',
+    accent: 'border-l-amber-500',
   },
   interaction: {
     label: 'Interaction',
-    icon: Sparkles,
-    color: 'text-purple-500 bg-purple-500/10 border-purple-500/20',
+    icon: MessageSquare,
+    color: 'text-teal-500',
+    bg: 'bg-teal-500/10',
+    border: 'border-teal-500/30',
+    accent: 'border-l-teal-500',
   },
   task_summary: {
-    label: 'Task',
-    icon: Sparkles,
-    color: 'text-green-500 bg-green-500/10 border-green-500/20',
+    label: 'Task Summary',
+    icon: CheckCircle,
+    color: 'text-green-500',
+    bg: 'bg-green-500/10',
+    border: 'border-green-500/30',
+    accent: 'border-l-green-500',
   },
   key_output: {
     label: 'Output',
-    icon: FileText,
-    color: 'text-orange-500 bg-orange-500/10 border-orange-500/20',
+    icon: Send,
+    color: 'text-rose-500',
+    bg: 'bg-rose-500/10',
+    border: 'border-rose-500/30',
+    accent: 'border-l-rose-500',
   },
 };
 
@@ -73,14 +98,42 @@ interface KnowledgeSource {
 }
 
 function formatTimeAgo(dateString: string | null | undefined): string {
-  if (!dateString) return 'Unknown';
+  if (!dateString) return 'Just now';
   try {
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Unknown';
+    if (isNaN(date.getTime())) return 'Just now';
     return formatDistanceToNow(date, { addSuffix: true });
   } catch {
-    return 'Unknown';
+    return 'Just now';
   }
+}
+
+function ImportanceDots({ score }: { score: number }) {
+  // Score is 1-10
+  const groups = [3, 3, 4];
+  let currentPos = 0;
+
+  return (
+    <div className="flex gap-1.5 items-center">
+      {groups.map((count, groupIdx) => (
+        <div key={groupIdx} className="flex gap-0.5">
+          {Array.from({ length: count }).map((_, i) => {
+            currentPos++;
+            const filled = currentPos <= score;
+            return (
+              <div 
+                key={i} 
+                className={cn(
+                  "size-1.5 rounded-full",
+                  filled ? "bg-primary" : "bg-muted"
+                )}
+              />
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function MemoryPage() {
@@ -89,9 +142,9 @@ export default function MemoryPage() {
   const [knowledge, setKnowledge] = useState<KnowledgeSource[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [memorySearchQuery, setMemorySearchQuery] = useState('');
-  const [knowledgeQuery, setKnowledgeQuery] = useState('');
-  const [knowledgeUrl, setKnowledgeUrl] = useState('');
-  const [isKnowledgeIngesting, setIsKnowledgeIngesting] = useState(false);
+  const [isSearchingHydra, setIsSearchingHydra] = useState(false);
+  const [hydraResults, setHydraResults] = useState<KnowledgeSource[]>([]);
+  
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newMemory, setNewMemory] = useState({ 
     content: '', 
@@ -100,8 +153,7 @@ export default function MemoryPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [memoryFilter, setMemoryFilter] = useState<FilterType>('all');
-  const [hydraSearchResults, setHydraSearchResults] = useState<KnowledgeSource[]>([]);
-  const [isSearchingHydra, setIsSearchingHydra] = useState(false);
+  const [isCleaning, setIsCleaning] = useState(false);
 
   const userId = user?.id;
 
@@ -123,7 +175,7 @@ export default function MemoryPage() {
 
   const fetchKnowledgeList = useCallback(async () => {
     try {
-      const response = await fetch('/api/knowledge?query=list&limit=50');
+      const response = await fetch('/api/knowledge?query=list&limit=20');
       if (response.ok) {
         const data = await response.json();
         if (data.knowledge && Array.isArray(data.knowledge)) {
@@ -142,11 +194,53 @@ export default function MemoryPage() {
     }
   }, [userId, fetchMemories, fetchKnowledgeList]);
 
+  // Semantic search debounced
+  useEffect(() => {
+    if (memorySearchQuery.length <= 3) {
+      setHydraResults([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearchingHydra(true);
+      try {
+        const response = await fetch('/api/hydra-memory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'recall',
+            query: memorySearchQuery,
+            maxResults: 3,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.chunks) {
+            setHydraResults(data.chunks.map((c: any) => ({
+              id: c.source_id || Math.random().toString(),
+              title: c.source_title || 'AI Match',
+              content: c.chunk_content,
+              score: c.relevancy_score,
+            })));
+          }
+        }
+      } catch (e) {
+        console.warn('Hydra search failed:', e);
+      } finally {
+        setIsSearchingHydra(false);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [memorySearchQuery]);
+
   const handleAddMemory = async () => {
-    if (!newMemory.content.trim() || !userId) return;
+    if (!newMemory.content.trim() || !userId || newMemory.content.length < 10) return;
 
     setIsSubmitting(true);
     try {
+      // 1. Store in Supabase
       const response = await fetch('/api/memory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -161,6 +255,22 @@ export default function MemoryPage() {
 
       if (response.ok) {
         const data = await response.json();
+        
+        // 2. Proactively store in HydraDB as well
+        try {
+          await fetch('/api/hydra-memory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'store',
+              text: newMemory.content,
+              metadata: { type: newMemory.type, userId }
+            }),
+          });
+        } catch (e) {
+          console.warn('Hydra storage failed:', e);
+        }
+
         if (data.memory) {
           setMemories(prev => [data.memory, ...prev]);
         }
@@ -174,92 +284,55 @@ export default function MemoryPage() {
     }
   };
 
-  const handleIngestKnowledge = async () => {
-    if (!knowledgeUrl.trim()) return;
-
-    setIsKnowledgeIngesting(true);
+  const handleDeleteMemory = async (id: string) => {
     try {
-      const response = await fetch('/api/knowledge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'ingest',
-          url: knowledgeUrl,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.knowledge) {
-          setKnowledge(prev => [{
-            id: data.knowledge.id,
-            title: data.knowledge.title,
-            url: data.knowledge.url,
-            content: data.knowledge.summary,
-          }, ...prev]);
-        }
-        setKnowledgeUrl('');
+      const res = await fetch(`/api/memory?id=${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setMemories(prev => prev.filter(m => m.id !== id));
       }
-    } catch (error) {
-      console.error('Failed to ingest knowledge:', error);
-    } finally {
-      setIsKnowledgeIngesting(false);
+    } catch (e) {
+      console.error('Delete failed:', e);
     }
   };
 
-  const handleSearchHydra = async () => {
-    if (!knowledgeQuery.trim()) return;
-
-    setIsSearchingHydra(true);
-    setHydraSearchResults([]);
+  const handleClearCorrupted = async () => {
+    if (!confirm('This will delete all long memories that appear to be raw JSON/Base64. Continue?')) return;
+    setIsCleaning(true);
     try {
-      const response = await fetch('/api/hydra-memory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'recall',
-          query: knowledgeQuery,
-          maxResults: 10,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.chunks && Array.isArray(data.chunks)) {
-          const results = data.chunks.map((chunk: { source_id?: string; source_title?: string; chunk_content?: string; relevancy_score?: number }) => ({
-            id: chunk.source_id || '',
-            title: chunk.source_title || 'Untitled',
-            content: chunk.chunk_content,
-            score: chunk.relevancy_score,
-          }));
-          setHydraSearchResults(results);
-        }
+      const res = await fetch('/api/memory/corrupted', { method: 'DELETE' });
+      if (res.ok) {
+        await fetchMemories();
       }
-    } catch (error) {
-      console.error('Failed to search HydraDB:', error);
+    } catch (e) {
+      console.error('Cleanup failed:', e);
     } finally {
-      setIsSearchingHydra(false);
+      setIsCleaning(false);
     }
   };
 
   const filteredMemories = memories.filter((entry) => {
-    const matchesSearch =
-      entry.content.toLowerCase().includes(memorySearchQuery.toLowerCase()) ||
-      entry.type.toLowerCase().includes(memorySearchQuery.toLowerCase()) ||
-      entry.source?.toLowerCase().includes(memorySearchQuery.toLowerCase());
-    
-    if (memoryFilter === 'all') return matchesSearch;
-    return matchesSearch && entry.type === memoryFilter;
+    const matchesSearch = entry.content.toLowerCase().includes(memorySearchQuery.toLowerCase());
+    const matchesFilter = memoryFilter === 'all' || entry.type === memoryFilter;
+    return matchesSearch && matchesFilter;
   });
 
-  const memoryTypeCounts = {
+  const memoryTypeCounts = useMemo(() => ({
+    all: memories.length,
     fact: memories.filter(m => m.type === 'fact').length,
     preference: memories.filter(m => m.type === 'preference').length,
     context: memories.filter(m => m.type === 'context').length,
     interaction: memories.filter(m => m.type === 'interaction').length,
     task_summary: memories.filter(m => m.type === 'task_summary').length,
     key_output: memories.filter(m => m.type === 'key_output').length,
-  };
+  }), [memories]);
+
+  // Base64 detection for cleanup button
+  const corruptedCount = memories.filter(m => {
+    const words = m.content.split(/\s+/);
+    return m.content.length > 200 && words.some(w => w.length > 50);
+  }).length;
+
+  const showCleanup = corruptedCount > (memories.length * 0.3) && memories.length > 5;
 
   if (isAuthLoading) {
     return (
@@ -270,370 +343,301 @@ export default function MemoryPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-8">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-8 pb-20">
       {/* Header */}
-      <div className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight">Memory</h1>
-        <p className="text-muted-foreground text-sm">
-          Your agent&apos;s persistent context and learned information
-        </p>
-      </div>
-
-      {/* Knowledge Section */}
-      <section className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="size-10 rounded-xl bg-cyan-500/10 flex items-center justify-center">
-            <BookOpen className="size-5 text-cyan-500" />
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold">Knowledge</h2>
-            <p className="text-xs text-muted-foreground">Ingested web content for semantic search</p>
-          </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-bold tracking-tight">Memory</h1>
+          <p className="text-muted-foreground text-sm">
+            Professional persistence and agent context.
+          </p>
         </div>
-
-        {/* Ingest URL */}
-        <Card className="p-4 rounded-xl border-border/50 bg-card">
-          <div className="flex gap-2">
-            <Input
-              placeholder="Enter URL to ingest (e.g., https://example.com)"
-              value={knowledgeUrl}
-              onChange={(e) => setKnowledgeUrl(e.target.value)}
-              className="flex-1 rounded-lg"
-            />
+        <div className="flex gap-2">
+          {showCleanup && (
             <Button 
+              variant="destructive" 
               size="sm" 
-              variant="outline"
-              className="rounded-lg gap-1.5"
-              onClick={handleIngestKnowledge}
-              disabled={!knowledgeUrl.trim() || isKnowledgeIngesting}
+              className="rounded-lg h-10" 
+              onClick={handleClearCorrupted}
+              disabled={isCleaning}
             >
-              {isKnowledgeIngesting ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Globe className="size-4" />
-              )}
-              Ingest
+              {isCleaning ? <Loader2 className="size-4 animate-spin mr-2" /> : <Trash2 className="size-4 mr-2" />}
+              Purge Raw Data
             </Button>
-          </div>
-        </Card>
-
-        {/* Knowledge Search */}
-        <Card className="p-4 rounded-xl border-border/50 bg-card space-y-3">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input
-                placeholder="Search knowledge semantically..."
-                value={knowledgeQuery}
-                onChange={(e) => setKnowledgeQuery(e.target.value)}
-                className="pl-9 rounded-lg"
-              />
-            </div>
-            <Button 
-              size="sm" 
-              variant="outline"
-              className="rounded-lg gap-1.5"
-              onClick={handleSearchHydra}
-              disabled={!knowledgeQuery.trim() || isSearchingHydra}
-            >
-              {isSearchingHydra ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Search className="size-4" />
-              )}
-              Search
-            </Button>
-          </div>
-
-          {/* Search Results */}
-          {hydraSearchResults.length > 0 && (
-            <div className="space-y-2 pt-2 border-t border-border/50">
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Search Results ({hydraSearchResults.length})
-              </h4>
-              <div className="space-y-2">
-                {hydraSearchResults.map((source, index) => (
-                  <Card key={`${source.id}-${index}`} className="p-3 rounded-lg bg-muted/30 border-border/50">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-2 flex-1">
-                        <Globe className="size-4 text-cyan-500 mt-0.5 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm">{source.title}</p>
-                          {source.content && (
-                            <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
-                              {source.content}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      {source.score && (
-                        <span className="text-[10px] text-muted-foreground shrink-0">
-                          {(source.score * 100).toFixed(0)}%
-                        </span>
-                      )}
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </div>
           )}
-        </Card>
-
-        {/* Knowledge List */}
-        <div className="space-y-2">
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Ingested URLs ({knowledge.length})
-          </h4>
-          {knowledge.length > 0 ? (
-            <div className="space-y-2">
-              {knowledge.slice(0, 20).map((source) => (
-                <Card key={source.id} className="p-3 rounded-xl border-border/50 bg-card">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-2 flex-1">
-                      <Globe className="size-4 text-cyan-500 mt-0.5 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm truncate">{source.title}</p>
-                        {source.content && (
-                          <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
-                            {source.content}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    {source.url && (
-                      <a 
-                        href={source.url} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center justify-center size-7 shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        <ExternalLink className="size-3.5" />
-                      </a>
-                    )}
-                  </div>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <Card className="p-6 rounded-xl border-border/50 bg-card text-center">
-              <Inbox className="size-6 mx-auto mb-2 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                No knowledge ingested yet
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Paste a URL above to ingest web content
-              </p>
-            </Card>
-          )}
-        </div>
-      </section>
-
-      {/* Memory Section */}
-      <section className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="size-10 rounded-xl bg-purple-500/10 flex items-center justify-center">
-            <Brain className="size-5 text-purple-500" />
-          </div>
-          <div className="flex-1">
-            <h2 className="text-lg font-semibold">Memories</h2>
-            <p className="text-xs text-muted-foreground">Structured memories stored in database</p>
-          </div>
-          <Button size="sm" className="rounded-lg gap-1.5" onClick={() => setIsAddDialogOpen(true)}>
+          <Button className="rounded-lg h-10 gap-2 font-medium" onClick={() => setIsAddDialogOpen(true)}>
             <Plus className="size-4" />
             Add Memory
           </Button>
         </div>
+      </div>
 
-        {/* Search and Filter */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input
-              placeholder="Search memories..."
-              value={memorySearchQuery}
-              onChange={(e) => setMemorySearchQuery(e.target.value)}
-              className="pl-9 rounded-lg bg-card border-border/50"
-            />
-          </div>
-          <Button size="sm" variant="outline" className="rounded-lg gap-1.5" onClick={fetchMemories}>
-            <RefreshCw className="size-4" />
-          </Button>
+      {/* Main Search & Filters */}
+      <div className="space-y-4 sticky top-0 z-20 bg-background/95 backdrop-blur-md pb-4 pt-1 border-b border-border/40">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+          <Input
+            placeholder="Search memories or ask semantically..."
+            value={memorySearchQuery}
+            onChange={(e) => setMemorySearchQuery(e.target.value)}
+            className="pl-10 h-12 rounded-xl bg-muted/20 border-border/50 focus:bg-background transition-all"
+          />
+          {isSearchingHydra && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              <Loader2 className="size-4 animate-spin text-muted-foreground" />
+            </div>
+          )}
         </div>
 
-        {/* Type Filter Pills */}
-        <div className="flex flex-wrap gap-1.5 p-1 bg-muted/30 rounded-xl w-fit">
+        <div className="flex flex-wrap gap-2 overflow-x-auto pb-2 no-scrollbar">
           <button
             onClick={() => setMemoryFilter('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              memoryFilter === 'all'
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
+            className={cn(
+              "px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition-all border",
+              memoryFilter === 'all' 
+                ? "bg-primary text-primary-foreground border-primary shadow-sm" 
+                : "bg-muted/30 text-muted-foreground border-border/50 hover:bg-muted/50"
+            )}
           >
-            All ({memories.length})
+            All ({memoryTypeCounts.all})
           </button>
           {Object.entries(typeConfig).map(([key, config]) => (
             <button
               key={key}
               onClick={() => setMemoryFilter(key as MemoryType)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                memoryFilter === key
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
+              className={cn(
+                "px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all border",
+                memoryFilter === key 
+                  ? "bg-primary text-primary-foreground border-primary shadow-sm" 
+                  : "bg-muted/30 text-muted-foreground border-border/50 hover:bg-muted/50"
+              )}
             >
-              {config.label} ({memoryTypeCounts[key as keyof typeof memoryTypeCounts]})
+               <config.icon className="size-3.5" />
+               {config.label} ({memoryTypeCounts[key as keyof typeof memoryTypeCounts]})
             </button>
           ))}
         </div>
-      </section>
+      </div>
 
-      {/* Timeline-style Memory List */}
-      <div className="relative">
-        {/* Timeline line */}
-        <div className="absolute left-6 top-0 bottom-0 w-px bg-border/50" />
-
-        <div className="space-y-4">
-          {isLoading ? (
-            <div className="text-center py-12 space-y-3">
-              <Loader2 className="size-8 mx-auto text-muted-foreground animate-spin" />
-              <p className="text-muted-foreground text-sm">Loading memories...</p>
+      {/* Results Workspace */}
+      <div className="space-y-8">
+        
+        {/* Semantic Section */}
+        {hydraResults.length > 0 && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-purple-500" />
+              <h3 className="text-sm font-bold tracking-tight text-purple-500 uppercase">Semantic AI Matches</h3>
             </div>
-          ) : filteredMemories.length === 0 ? (
-            <div className="text-center py-12 space-y-3">
-              <div className="size-12 rounded-2xl bg-muted mx-auto flex items-center justify-center">
-                <Brain className="size-6 text-muted-foreground" />
-              </div>
-              <p className="text-muted-foreground text-sm">
-                {memorySearchQuery || memoryFilter !== 'all' ? 'No memories match your filters' : 'No memories yet'}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {memorySearchQuery || memoryFilter !== 'all' ? 'Try different filters' : 'Memories are stored automatically as you use the agent'}
-              </p>
-            </div>
-          ) : (
-            filteredMemories.map((entry) => {
-              const config = typeConfig[entry.type] || typeConfig.context;
-              const Icon = config.icon;
-
-              return (
-                <div key={entry.id} className="relative pl-14">
-                  {/* Timeline dot */}
-                  <div className={`absolute left-4 top-4 size-4 rounded-full bg-background border-2 z-10 ${config.color.split(' ')[1]}`} />
-
-                  <Card className="p-4 rounded-2xl border-border/50 bg-card">
-                    <div className="flex items-start justify-between gap-4 mb-2">
-                      <div className="flex items-center gap-2">
-                        <div className={`size-6 rounded-md ${config.color} flex items-center justify-center`}>
-                          <Icon className="size-3.5" />
-                        </div>
-                        <span className={`text-xs font-medium ${config.color}`}>
-                          {config.label}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Clock className="size-3" />
-                        {formatTimeAgo(entry.created_at)}
+            <div className="grid gap-4">
+              {hydraResults.map((result, idx) => (
+                <Card key={idx} className="p-4 border-purple-500/30 bg-purple-500/[0.03] rounded-2xl relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Badge variant="secondary" className="bg-purple-100 text-purple-700 text-[10px]">AI Rank {idx + 1}</Badge>
+                  </div>
+                  <div className="flex gap-4">
+                    <div className="shrink-0 size-10 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-500">
+                      <Brain className="size-5" />
+                    </div>
+                    <div className="space-y-1 flex-1">
+                      <p className="text-sm font-medium leading-relaxed text-foreground/90">{result.content}</p>
+                      <div className="flex items-center gap-2 pt-1 text-[10px] text-muted-foreground">
+                        <Badge variant="outline" className="text-[9px] border-purple-500/20 text-purple-500">Hydra Match</Badge>
+                        <span>Relevancy: {Math.round((result.score || 0) * 100)}%</span>
                       </div>
                     </div>
-                    <p className="text-sm leading-relaxed">{entry.content}</p>
-                    {entry.source && (
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Source: {entry.source}
-                      </p>
-                    )}
-                  </Card>
-                </div>
-              );
-            })
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Regular Memory List */}
+        <div className="space-y-4">
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <Loader2 className="size-10 animate-spin text-muted-foreground/30" />
+              <p className="text-muted-foreground font-medium">Retrieving memory nodes...</p>
+            </div>
+          ) : filteredMemories.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-4 border-2 border-dashed border-border/50 rounded-3xl bg-muted/10">
+              <div className="size-16 rounded-3xl bg-muted/30 flex items-center justify-center">
+                <Brain className="size-8 text-muted-foreground/40" />
+              </div>
+              <div className="text-center px-6">
+                <h3 className="font-bold text-lg mb-1">No Memories Found</h3>
+                <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+                  Try adjusting your search or filters to see more results.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-5">
+              {filteredMemories.map((entry) => {
+                const config = typeConfig[entry.type] || typeConfig.context;
+                return (
+                  <MemoryCard 
+                    key={entry.id} 
+                    memory={entry} 
+                    config={config} 
+                    onDelete={handleDeleteMemory} 
+                  />
+                );
+              })}
+            </div>
           )}
         </div>
       </div>
 
       {/* Add Memory Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[450px] rounded-3xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Brain className="size-5 text-purple-500" />
-              Add Memory
+            <DialogTitle className="flex items-center gap-2 py-2">
+              <Brain className="size-5 text-primary" />
+              Store New Knowledge
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-5 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Content</label>
+          <div className="space-y-6 pt-2">
+            <div className="space-y-3">
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Detailed Content</label>
               <Textarea
-                placeholder="What would you like to remember?"
+                placeholder="Agent context, facts, or observations..."
                 value={newMemory.content}
                 onChange={(e) => setNewMemory((prev) => ({ ...prev, content: e.target.value }))}
-                className="min-h-[120px] resize-none"
+                className="min-h-[140px] rounded-2xl resize-none bg-muted/20 border-border/50 focus:bg-background transition-all p-4"
               />
+              <p className="text-[10px] text-muted-foreground">Min. 10 characters required.</p>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Type</label>
-              <Select 
-                value={newMemory.type} 
-                onValueChange={(value) => setNewMemory((prev) => ({ ...prev, type: value as MemoryType }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(typeConfig).map(([key, config]) => (
-                    <SelectItem key={key} value={key}>
-                      <div className="flex items-center gap-2">
-                        <div className={`size-2 rounded-full ${config.color.split(' ')[1]}`} />
-                        {config.label}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Importance: {newMemory.importance}/10</label>
-              <div className="flex gap-1">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
-                  <button
-                    key={level}
-                    type="button"
-                    onClick={() => setNewMemory((prev) => ({ ...prev, importance: level }))}
-                    className={`flex-1 py-2 rounded text-xs font-medium transition-colors ${
-                      newMemory.importance === level
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted hover:bg-muted/80 text-muted-foreground'
-                    }`}
-                  >
-                    {level}
-                  </button>
-                ))}
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Classification</label>
+                <Select 
+                  value={newMemory.type} 
+                  onValueChange={(value) => setNewMemory((prev) => ({ ...prev, type: value as MemoryType }))}
+                >
+                  <SelectTrigger className="rounded-xl h-11 border-border/50 bg-muted/20">
+                    <SelectValue placeholder="Type" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    {Object.entries(typeConfig).map(([key, config]) => (
+                      <SelectItem key={key} value={key} className="rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <config.icon className={cn("size-3.5", config.color)} />
+                          {config.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="flex justify-between text-[10px] text-muted-foreground">
-                <span>Low</span>
-                <span>Medium</span>
-                <span>High</span>
+              
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Priority</label>
+                  <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">{newMemory.importance} / 10</span>
+                </div>
+                <div className="flex items-center h-11 px-1">
+                   <input 
+                    type="range" 
+                    min="1" 
+                    max="10" 
+                    value={newMemory.importance} 
+                    onChange={(e) => setNewMemory(p => ({ ...p, importance: parseInt(e.target.value) }))}
+                    className="w-full accent-primary"
+                   />
+                </div>
               </div>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-                Cancel
-              </Button>
+            
+            <DialogFooter className="pt-2">
               <Button 
                 onClick={handleAddMemory} 
-                disabled={!newMemory.content.trim() || isSubmitting}
-                className="gap-1.5"
+                disabled={!newMemory.content.trim() || isSubmitting || newMemory.content.length < 10}
+                className="w-full h-12 rounded-2xl shadow-xl shadow-primary/20 gap-2 font-bold"
               >
-                {isSubmitting ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Brain className="size-4" />
-                )}
-                Save Memory
+                {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Brain className="size-4" />}
+                Persist to Memory
               </Button>
-            </div>
+            </DialogFooter>
           </div>
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function MemoryCard({ memory, config, onDelete }: { 
+  memory: DbMemoryNode, 
+  config: any, 
+  onDelete: (id: string) => void 
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = memory.content.length > 280;
+  const contentToDisplay = (expanded || !isLong) ? memory.content : memory.content.substring(0, 280) + '...';
+
+  return (
+    <Card className={cn(
+      "p-5 rounded-2xl border-border/50 bg-card hover:border-border transition-all group border-l-4",
+      config.accent
+    )}>
+      <div className="flex flex-col gap-4">
+        {/* Header row */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className={cn("p-1.5 rounded-lg", config.bg, config.color)}>
+              <config.icon className="size-3.5" />
+            </div>
+            <span className={cn("text-[10px] font-bold tracking-widest uppercase", config.color)}>
+              {config.label}
+            </span>
+          </div>
+          
+          <div className="flex items-center gap-3">
+             <div className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground tabular-nums">
+              <Clock className="size-3" />
+              {formatTimeAgo(memory.created_at)}
+            </div>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="size-7 rounded-full text-muted-foreground hover:text-destructive transition-all md:opacity-0 group-hover:opacity-100"
+              onClick={() => onDelete(memory.id)}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Content Section */}
+        <div className="space-y-2">
+          <p className={cn(
+            "text-[14px] leading-relaxed font-normal text-foreground/90 whitespace-pre-wrap break-words",
+          )}>
+            {contentToDisplay}
+          </p>
+          {isLong && (
+            <button 
+              onClick={() => setExpanded(!expanded)} 
+              className="text-[11px] font-bold text-primary hover:underline"
+            >
+              {expanded ? 'Show less' : 'Read more'}
+            </button>
+          )}
+        </div>
+
+        {/* Footer row */}
+        <div className="pt-2 flex items-center justify-between border-t border-border/40">
+          <ImportanceDots score={memory.importance} />
+          {memory.source && (
+            <Badge variant="outline" className="text-[9px] font-medium text-muted-foreground border-border/50 uppercase tracking-tighter">
+              via {memory.source}
+            </Badge>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 }

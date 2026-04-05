@@ -169,6 +169,55 @@ export async function createAndExecuteTask(
       return String(data);
     }
 
+    function summarizeForMemory(taskInput: string, result: any): string {
+      if (!result) return `Task completed: ${taskInput.substring(0, 100)}`;
+      
+      const data = (result && typeof result === 'object' && 'data' in result && result.data) 
+        ? result.data 
+        : result;
+
+      // Base64 / Garbage Detection
+      const isGarbage = (text: string) => {
+        if (!text || typeof text !== 'string') return false;
+        // Check for long strings without spaces or with high non-alpha ratio
+        const words = text.split(/\s+/);
+        const hasLongWord = words.some(w => w.length > 50);
+        const nonAlphaRatio = (text.match(/[^a-zA-Z0-9\s,.!?-]/g) || []).length / text.length;
+        return hasLongWord || nonAlphaRatio > 0.4;
+      };
+
+      // Gmail Fetch
+      if (data.messages && Array.isArray(data.messages)) {
+        const count = data.messages.length;
+        const recent = data.messages[0];
+        const from = recent?.sender || recent?.from || 'Unknown';
+        const subject = recent?.subject || '(No Subject)';
+        return `Fetched ${count} email${count > 1 ? 's' : ''}. Most recent from ${from} about "${subject}".`;
+      }
+
+      // Gmail Send
+      if (data.id || data.messageId) {
+        if (taskInput.toLowerCase().includes('send') || taskInput.toLowerCase().includes('email')) {
+          const toMatch = taskInput.match(/to\s+([^\s,]+)/i);
+          const to = toMatch ? toMatch[1] : 'recipient';
+          return `Sent email to ${to}${data.subject ? ` with subject "${data.subject}"` : ''}.`;
+        }
+      }
+
+      // GitHub
+      if (data.number && (data.html_url || data.url)) {
+        return `Created GitHub issue #${data.number}: "${data.title || 'Untitled'}"`;
+      }
+
+      // Fallback for simple answers
+      if (typeof data === 'string' && !isGarbage(data)) {
+        return `Question: ${taskInput}. Answer: ${data}`;
+      }
+
+      const summary = `Task completed: ${taskInput.substring(0, 100)}${taskInput.length > 100 ? '...' : ''}`;
+      return summary;
+    }
+
     function normalizeStepResult(result: unknown): string {
       if (!result) return '';
       if (typeof result === 'string') return result;
@@ -257,9 +306,7 @@ export async function createAndExecuteTask(
     await updateTask(task.id, { status: finalStatus, result: finalResult });
 
     // Step 6: Store in memory — try HydraDB first, fall back to Supabase
-    const memoryText = finalResult.answer
-      ? `Question: ${input}. Answer: ${finalResult.answer}`
-      : `Task completed: ${input}. Result: ${finalResult.summary}`;
+    const memoryText = summarizeForMemory(input, finalResult.answer || finalResult);
 
     try {
       await hydraStoreMemory(memoryText, { userId: internalUserId, taskId: task.id });
