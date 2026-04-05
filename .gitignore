@@ -1,0 +1,68 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+.yarn/*
+
+# Testing
+/coverage
+
+# Next.js
+/.next/
+/out/
+/build/
+
+# Production
+/dist
+
+# Misc
+.DS_Store
+*.pem
+.env
+.env*.local
+!.env.example
+.pnpm-debug.log*
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Turbopack
+.turbopack/
+.turbopack-build/
+
+# Bun
+bun.lockb
+
+# Test files
+test-*.js
+test-*.ts
+*.test.js
+*.test.ts
+
+# Codebase analysis
+CODEBASE_ANALYSIS.txt
+
+# Deploy scripts
+deploy.sh
+
+# Agent instructions
+AGENTS.md
+CLAUDE.md
+
+# Vercel
+vercel.json
