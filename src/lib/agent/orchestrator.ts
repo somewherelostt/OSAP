@@ -5,6 +5,7 @@ import { summarizeForMemory } from '@/lib/executor-enhanced';
 import { executeTool } from '@/lib/tools-enhanced';
 import { executeComposioToolCall } from '@/lib/composio';
 import { DEFAULT_POLICY } from '@/lib/tool-categories';
+import { extractJSON } from '../json';
 
 export type AgentStatus = 'idle' | 'planning' | 'executing' | 'paused' | 'completed' | 'failed';
 export type AgentPriority = 'low' | 'medium' | 'high' | 'critical';
@@ -435,10 +436,7 @@ Output your thought process in JSON format:
       
       if (!content) throw new Error('No response from LLM');
 
-      const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) || content.match(/(\{[\s\S]*\})/);
-      const jsonStr = jsonMatch ? jsonMatch[1] : content;
-      
-      return JSON.parse(jsonStr);
+      return extractJSON(content);
     } catch (error) {
       console.error('[AgentOrchestrator] LLM call failed:', error);
       throw error;

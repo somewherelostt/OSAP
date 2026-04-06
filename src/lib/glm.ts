@@ -1,4 +1,5 @@
 import type { TaskPlan, PlanStep } from '@/types/database';
+import { extractJSON } from './json';
 
 const GLM_API_URL = process.env.GLM_API_URL || 'https://api.z.ai/api/coding/paas/v4/chat/completions';
 const GLM_API_KEY = process.env.GLM_API_KEY;
@@ -137,15 +138,12 @@ For simple questions — answer directly in the "answer" field with no steps or 
       return { error: 'No response from GLM' };
     }
 
-    // Parse the JSON response
+    // Parse the JSON response using the robust extractor
     let parsed;
     try {
-      // Try to extract JSON from markdown if present
-      const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) || content.match(/(\{[\s\S]*\})/);
-      const jsonStr = jsonMatch ? jsonMatch[1] : content;
-      parsed = JSON.parse(jsonStr);
-    } catch {
-      return { error: `Failed to parse GLM response: ${content.substring(0, 200)}` };
+      parsed = extractJSON(content);
+    } catch (e) {
+      return { error: `Failed to parse GLM response: ${e instanceof Error ? e.message : 'Unknown error'}. Raw: ${content.substring(0, 100)}` };
     }
 
     // Validate the plan structure - new format has top-level steps
@@ -242,9 +240,7 @@ Intents:
       return { error: 'No response from GLM' };
     }
 
-    const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) || content.match(/(\{[\s\S]*\})/);
-    const jsonStr = jsonMatch ? jsonMatch[1] : content;
-    const parsed = JSON.parse(jsonStr);
+    const parsed = extractJSON(content);
 
     return {
       intent: parsed.intent || 'unknown',
