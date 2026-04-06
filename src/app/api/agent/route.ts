@@ -44,7 +44,23 @@ export async function GET(request: NextRequest) {
   if (agentId) {
     const orchestrator = getAgentOrchestrator();
     const agent = orchestrator.getAgent(agentId);
-    if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    if (!agent) {
+      return NextResponse.json({ 
+        status: 'idle',
+        thoughts: [],
+        metrics: {
+          totalExecutions: 0,
+          successfulExecutions: 0,
+          failedExecutions: 0,
+          averageExecutionTimeMs: 0,
+          totalTokensUsed: 0,
+          selfCorrections: 0,
+          learnedStrategies: 0,
+        },
+        plan: null,
+        error: 'Agent session expired or not found'
+      }, { status: 200 });
+    }
     return NextResponse.json({ agent });
   }
 
