@@ -9,15 +9,8 @@ import {
   XCircle, 
   Loader2, 
   Clock, 
-  Mail, 
-  GitBranch, 
-  Brain, 
-  ExternalLink,
-  User,
-  Info,
   Reply,
   Copy,
-  Sparkles,
   Search,
   Check
 } from 'lucide-react';
@@ -63,7 +56,6 @@ interface TaskCardProps {
 export function TaskCard({ task, initiallyExpanded = false }: TaskCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(initiallyExpanded);
-  const [showRawJson, setShowRawJson] = useState(false);
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
   const [expandedEmails, setExpandedEmails] = useState<Set<number>>(new Set());
   const [showAllEmails, setShowAllEmails] = useState(false);
@@ -472,36 +464,18 @@ export function TaskCard({ task, initiallyExpanded = false }: TaskCardProps) {
               </div>
 
               {/* Task Footer */}
-              <div className="pt-4 flex items-center justify-between border-t border-border/40">
-                <button 
-                  className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground/50 hover:text-primary transition-colors flex items-center gap-1.5"
-                  onClick={() => setShowRawJson(!showRawJson)}
-                >
-                  <Search className="size-3" />
-                  {showRawJson ? 'Hide Debug Info' : 'Debug JSON'}
-                </button>
-                <div className="flex items-center gap-3 text-[11px] text-muted-foreground/60 font-medium">
+              <div className="pt-4 flex items-center justify-end gap-3 text-[11px] text-muted-foreground/60 font-medium border-t border-border/40">
+                <div className="flex items-center gap-1">
+                  <Check className="size-3" />
+                  <span>{steps.length} {steps.length === 1 ? 'step' : 'steps'}</span>
+                </div>
+                {getTaskDuration() && (
                   <div className="flex items-center gap-1">
-                    <Check className="size-3" />
-                    <span>{steps.length} steps</span>
+                    <Clock className="size-3" />
+                    <span>{getTaskDuration()}</span>
                   </div>
-                  {getTaskDuration() && (
-                    <div className="flex items-center gap-1">
-                      <Clock className="size-3" />
-                      <span>{getTaskDuration()} total</span>
-                    </div>
-                  )}
-                  <span className="opacity-40 italic ml-2">#{task.id.slice(0, 8)}</span>
-                </div>
+                )}
               </div>
-
-              {showRawJson && (
-                <div className="pt-2">
-                  <pre className="p-4 rounded-xl bg-[#0f172a] text-slate-300 font-mono text-[11px] overflow-auto max-h-80 border border-slate-800 shadow-inner">
-                    {JSON.stringify(task.result || task, null, 2)}
-                  </pre>
-                </div>
-              )}
             </div>
           </motion.div>
         )}

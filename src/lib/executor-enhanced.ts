@@ -91,6 +91,16 @@ export function formatStepResult(tool: string, result: any): string {
 
   if (tool === 'http_request' || tool === 'HTTP_REQUEST') {
     const body = data?.data || data?.body || data?.response || data;
+    const status = data?.status || data?.statusCode;
+
+    // Check for GitHub auth error
+    if (status === 401 || body?.message?.includes('authentication') || body?.message?.includes('Requires authentication')) {
+      return '⚠️ **GitHub not connected**\n\nPlease connect your GitHub account in **Profile → Connected Apps** to enable this feature.';
+    }
+
+    if (status === 403 || body?.message?.includes('Forbidden')) {
+      return '⚠️ **Access denied**\n\nGitHub API access was forbidden. Check your permissions or connect your account.';
+    }
 
     if (Array.isArray(body) && body[0]?.name && body[0]?.html_url) {
       return body.map((repo: { name: string; html_url: string; description?: string; updated_at?: string }, i: number) =>
