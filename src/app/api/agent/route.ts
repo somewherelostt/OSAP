@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
       });
 
       const context = {
-        userId: user.id,
+        userId: clerkUserId, // Use clerkUserId or internal user.id
         sessionId: `session_${Date.now()}`,
         input: task,
         context: {},
@@ -174,11 +174,11 @@ export async function POST(request: NextRequest) {
         update(100, 'Saving memories and finalizing...');
         const memoryText = summarizeForMemory(task, results);
         try {
-          await hydraStoreMemory(memoryText, { userId: user.id, taskId: bgTask.id });
+          await hydraStoreMemory(memoryText, { userId: user.id || clerkUserId, taskId: bgTask.id });
         } catch (e) {
           console.warn('[AgentRoute] HydraDB store failed, falling back to Supabase');
           await createMemoryNode({
-            user_id: user.id,
+            user_id: user.id || clerkUserId,
             type: 'task_summary',
             content: memoryText,
             source: 'autonomous_agent',
@@ -221,8 +221,6 @@ export async function POST(request: NextRequest) {
       orchestrator.setStatus(agentId, 'idle');
       return NextResponse.json({ agent: orchestrator.getAgent(agentId) });
     }
-
-    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   } catch (error) {

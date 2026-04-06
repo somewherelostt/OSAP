@@ -342,7 +342,7 @@ Output your thought process in JSON format:
     if (!step) throw new Error(`Step ${stepId} not found`);
 
     const context: ExecutionContext = {
-      userId: agent.id,
+      userId: agent.id, // Keep agent context or pass user context if needed
       sessionId: generateId(),
       input: agent.currentPlan.objective,
       context: {},
