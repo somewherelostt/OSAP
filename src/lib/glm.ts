@@ -78,22 +78,32 @@ Format:
 Built-in tools (use these directly, no auth needed):
 - memory_store: { content: string } — store something in memory
 - memory_recall: { query: string } — search memory
-- http_request: { url: string, method: string, body?: object } — make HTTP request
 
-Composio tools (use these for external services, requires user auth):
-- GMAIL_FETCH_EMAILS: { max_results: number, query?: string } — fetch emails from Gmail
-- GMAIL_SEND_EMAIL: { to: string, subject: string, body: string } — send email
-- GMAIL_GET_EMAIL_BY_ID: { message_id: string } — get specific email
-- GITHUB_CREATE_ISSUE: { owner: string, repo: string, title: string, body?: string }
-- GITHUB_LIST_ISSUES: { owner: string, repo: string, state?: string }
-- GITHUB_GET_PULL_REQUESTS: { owner: string, repo: string }
-- SLACK_SEND_MESSAGE: { channel: string, text: string }
-- TWITTER_CREATE_TWEET: { text: string }
-- GOOGLECALENDAR_LIST_EVENTS: { max_results?: number }
-- GOOGLECALENDAR_CREATE_EVENT: { summary: string, start: string, end: string }
+IMPORTANT: For GitHub, Gmail, Slack, Twitter, Calendar — ALWAYS use Composio tools below. NEVER use raw HTTP requests for authenticated APIs.
 
-For tasks involving email, calendar, GitHub, Slack, Twitter — use Composio tools.
-For simple questions — answer directly in the "answer" field with no steps or a single memory_store step.`;
+Composio tools (requires user to connect the app in Profile → Connected Apps):
+GITHUB:
+- GITHUB_GET_REPOS: { max_results?: number } — Get authenticated user's repositories (sorted by updated)
+- GITHUB_CREATE_AN_ISSUE: { owner: string, repo: string, title: string, body?: string } — Create an issue
+- GITHUB_LIST_ISSUES: { owner: string, repo: string, state?: string } — List issues
+- GITHUB_CREATE_REPO: { name: string, description?: string, private?: boolean } — Create a repository
+
+GMAIL:
+- GMAIL_FETCH_EMAILS: { max_results: number, query?: string } — Fetch emails
+- GMAIL_SEND_EMAIL: { to: string, subject: string, body: string } — Send email
+- GITHUB_GET_EMAIL_BY_ID: { message_id: string } — Get specific email
+
+SLACK:
+- SLACK_SEND_MESSAGE: { channel: string, text: string } — Send Slack message
+
+TWITTER:
+- TWITTER_CREATE_TWEET: { text: string } — Post a tweet
+
+GOOGLECALENDAR:
+- GOOGLECALENDAR_LIST_EVENTS: { max_results?: number } — List calendar events
+- GOOGLECALENDAR_CREATE_EVENT: { summary: string, start: string, end: string } — Create event
+
+For simple questions — answer directly in the "answer" field with no steps.`;
 
   const userInput = input;
   const userContext = '';

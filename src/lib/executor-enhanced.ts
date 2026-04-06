@@ -85,8 +85,12 @@ export function formatStepResult(tool: string, result: any): string {
   }
 
   if (tool === 'memory_recall') {
-    const content = data.content || (Array.isArray(data) ? data.map((m: any) => m.content).join('\n') : String(data));
-    return content;
+    if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+      return data.results.map((m: any) => m.content || JSON.stringify(m)).join('\n\n');
+    }
+    if (data.content) return data.content;
+    if (Array.isArray(data)) return data.map((m: any) => m.content || JSON.stringify(m)).join('\n\n');
+    return 'No memories found';
   }
 
   if (tool === 'http_request' || tool === 'HTTP_REQUEST') {
