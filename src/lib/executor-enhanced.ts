@@ -89,6 +89,30 @@ export function formatStepResult(tool: string, result: any): string {
     return content;
   }
 
+  if (tool === 'http_request' || tool === 'HTTP_REQUEST') {
+    const body = data?.data || data?.body || data?.response || data;
+
+    if (Array.isArray(body) && body[0]?.name && body[0]?.html_url) {
+      return body.map((repo: { name: string; html_url: string; description?: string; updated_at?: string }, i: number) =>
+        `${i + 1}. **${repo.name}**\n   ${repo.description || 'No description'}\n   ${repo.html_url}`
+      ).join('\n\n');
+    }
+
+    if (Array.isArray(body) && body[0]?.full_name) {
+      return body.map((repo: { full_name: string; description?: string; stargazers_count?: number; html_url: string }, i: number) =>
+        `${i + 1}. ${repo.full_name} ${repo.stargazers_count ? `⭐ ${repo.stargazers_count}` : ''}\n   ${repo.html_url}`
+      ).join('\n\n');
+    }
+
+    if (typeof body === 'string') return body;
+
+    if (typeof body === 'object' && body !== null) {
+      return JSON.stringify(body, null, 2).slice(0, 500);
+    }
+
+    return 'Request completed successfully';
+  }
+
   if (typeof data === 'object' && data !== null) {
     return 'Completed successfully';
   }
@@ -269,17 +293,31 @@ export async function createAndExecuteTask(
     console.log('[Executor] Step results:', JSON.stringify(stepResults, null, 2));
 
     // Build final result with answer and summary
-    const directAnswer = plan.answer || null;
-    const stepOutputs = stepResults
-      .filter(s => s.status === 'success' && s.result)
-      .map(s => normalizeStepResult(s.result))
-      .filter(Boolean);
+    // Filter out memory steps - we want DATA steps for the answer
+    const dataSteps = stepResults.filter(s =>
+      s.status === 'success' &&
+      s.step.tool !== 'memory_store' &&
+      s.step.tool !== 'memory_recall'
+    );
 
-    const finalAnswer = directAnswer || stepOutputs[0] || null;
-    
+    const memorySteps = stepResults.filter(s => s.step.tool === 'memory_store');
+
+    let finalAnswer = '';
+
+    // Build the answer from DATA steps (last one wins for multi-step)
+    if (dataSteps.length > 0) {
+      finalAnswer = dataSteps.map(s => s.formatted || normalizeStepResult(s.result)).join('\n\n');
+    } else if (plan.answer) {
+      finalAnswer = plan.answer;
+    }
+
+    // Get formatted answer from last DATA step (not memory step)
+    const lastDataStep = dataSteps.length > 0 ? dataSteps[dataSteps.length - 1] : null;
+    const formattedAnswer = lastDataStep?.formatted || finalAnswer;
+
     const finalResult = {
       answer: finalAnswer,
-      formatted_answer: stepResults.length > 0 ? stepResults[stepResults.length - 1].formatted : null,
+      formatted_answer: formattedAnswer,
       summary: finalAnswer
         ? String(finalAnswer).substring(0, 100)
         : `Completed ${stepResults.length} steps`,

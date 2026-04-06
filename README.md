@@ -25,6 +25,37 @@ Every Monday morning, you used to spend 20 minutes checking which GitHub issues 
 - **Developer Tools** — Built-in code editor, terminal, API client, and Git panel
 - **Trigger Automation** — Schedule tasks or set up event-driven workflows
 
+## Visual Showcase
+
+<div align="center">
+  <table style="width: 100%; border-collapse: collapse; border: none;">
+    <tr>
+      <td width="33%"><img src="public/screenshots/1.png" alt="Personal Agent OS" style="border-radius: 8px; border: 1px solid #333;" /></td>
+      <td width="33%"><img src="public/screenshots/2.png" alt="Mobile View" style="border-radius: 8px; border: 1px solid #333;" /></td>
+      <td width="33%"><img src="public/screenshots/3.png" alt="Tasks View" style="border-radius: 8px; border: 1px solid #333;" /></td>
+    </tr>
+    <tr>
+      <td align="center"><b>The command center for your digital workforce</b></td>
+      <td align="center"><b>Your AI agent, now fitting in your pocket</b></td>
+      <td align="center"><b>Real-time autonomous task tracking</b></td>
+    </tr>
+    <tr>
+      <td colspan="2"><img src="public/screenshots/4.png" alt="Profile Logic" style="border-radius: 8px; border: 1px solid #333; margin-top: 20px;" /></td>
+      <td width="33%"><img src="public/screenshots/5.png" alt="Detailed Insight" style="border-radius: 8px; border: 1px solid #333; margin-top: 20px;" /></td>
+    </tr>
+    <tr>
+      <td colspan="2" align="center"><b>Tailor your agent's soul with precision memory</b></td>
+      <td align="center"><b>Deep-dive into the agent's reasoning</b></td>
+    </tr>
+    <tr>
+      <td colspan="3" align="center">
+        <img src="public/screenshots/9.png" alt="Developer Environment" style="border-radius: 12px; border: 1px solid #333; margin-top: 20px; width: 100%;" />
+        <br/><b>A full-throttle IDE built directly into your agent's brain</b>
+      </td>
+    </tr>
+  </table>
+</div>
+
 ## Tech Stack
 
 | Layer | Technology |

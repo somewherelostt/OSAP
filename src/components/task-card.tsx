@@ -25,6 +25,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/status-badge';
+import { FormattedResult } from '@/components/formatted-result';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -115,6 +116,45 @@ export function TaskCard({ task, initiallyExpanded = false }: TaskCardProps) {
     const encoded = encodeURIComponent(query);
     router.push(`/?q=${encoded}`);
   };
+
+  const getTaskPreview = () => {
+    if (!result) return '';
+    const answer = result.answer;
+
+    if (answer &&
+        !String(answer).includes('Stored in memory') &&
+        !String(answer).includes('memory_store') &&
+        !String(answer).includes('memory_recall')) {
+      return String(answer).split('\n')[0].replace(/\*\*/g, '').slice(0, 100);
+    }
+
+    const dataStep = result.steps?.find((s: Step) =>
+      s.status === 'success' &&
+      s.step?.tool !== 'memory_store' &&
+      s.step?.tool !== 'memory_recall'
+    );
+
+    if (dataStep?.formatted) {
+      return dataStep.formatted.split('\n')[0].replace(/\*\*/g, '').slice(0, 100);
+    }
+
+    if (dataStep?.result) {
+      const r = dataStep.result;
+      if (Array.isArray(r) && r[0]?.name) {
+        return `Found ${r.length} repositories`;
+      }
+      if (Array.isArray(r) && r[0]?.full_name) {
+        return `Found ${r.length} repositories`;
+      }
+      if (r.messages && Array.isArray(r.messages)) {
+        return `${r.messages.length} emails fetched`;
+      }
+    }
+
+    return '';
+  };
+
+  const preview = getTaskPreview();
 
   const getToolBadgeStyles = (tool: string) => {
     const t = tool.toLowerCase();
@@ -329,9 +369,9 @@ export function TaskCard({ task, initiallyExpanded = false }: TaskCardProps) {
                  {smartSummary}
                </div>
             )}
-            {!smartSummary && !isExpanded && (
+            {!smartSummary && !isExpanded && preview && (
               <div className="text-[11px] text-muted-foreground border-l border-border pl-3 truncate italic opacity-80">
-                {String(formattedAnswer || task.error || 'Thinking...').split('\n')[0].substring(0, 60)}...
+                {preview}...
               </div>
             )}
           </div>
@@ -355,8 +395,14 @@ export function TaskCard({ task, initiallyExpanded = false }: TaskCardProps) {
                 <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1.5 px-1">
                   Result
                 </h4>
-                <div className="text-[14px] leading-relaxed whitespace-pre-line text-foreground font-medium bg-card border border-border/40 rounded-xl p-4 shadow-sm">
-                  {formattedAnswer || (task.status === 'success' ? 'Completed successfully' : task.error || 'Processing...')}
+                <div className="bg-card border border-border/40 rounded-xl p-4 shadow-sm">
+                  {formattedAnswer ? (
+                    <FormattedResult text={formattedAnswer} />
+                  ) : (
+                    <p className="text-[14px] leading-relaxed text-foreground font-medium">
+                      {task.status === 'success' ? 'Completed successfully' : task.error || 'Processing...'}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -403,11 +449,16 @@ export function TaskCard({ task, initiallyExpanded = false }: TaskCardProps) {
                               className="overflow-hidden"
                             >
                               <div className="pb-3 px-1">
-                                <div className="text-[12px] text-muted-foreground font-medium mb-1">Formatted Output:</div>
-                                <div className="text-[13px] text-foreground/90 leading-relaxed font-normal whitespace-pre-line bg-muted/20 p-3 rounded-lg border border-border/20">
-                                  {s.formatted || 'System processed this step successfully.'}
+                                <div className="text-[12px] text-muted-foreground font-medium mb-1">Output:</div>
+                                <div className="bg-muted/20 p-3 rounded-lg border border-border/20">
+                                  {s.formatted ? (
+                                    <FormattedResult text={s.formatted} className="text-[13px] text-foreground/90 leading-relaxed font-normal" />
+                                  ) : (
+                                    <p className="text-[13px] text-foreground/90 leading-relaxed font-normal">
+                                      System processed this step successfully.
+                                    </p>
+                                  )}
                                 </div>
-                                {/* Specialized rendering for specific tools within a step if needed */}
                                 {(s.step.tool.includes('GMAIL_FETCH') || s.step.tool.includes('GMAIL_LIST')) && s.result && (
                                     renderEmailCards(s.result)
                                 )}
