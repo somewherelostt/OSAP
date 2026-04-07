@@ -25,7 +25,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <main className={cn(
                 "md:pl-20 transition-all w-full",
                 pathname === '/chat' 
-                  ? "h-[100dvh] overflow-hidden pb-[70px] md:pb-0" 
+                  ? "h-[100dvh] overflow-hidden" 
                   : "min-h-screen pb-24 md:pb-0"
               )}>
                 {children}
