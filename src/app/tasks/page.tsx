@@ -53,7 +53,7 @@ export default function TasksPage() {
   useEffect(() => {
     if (anonymousId) {
       fetchTasks();
-      const interval = setInterval(fetchTasks, 5000);
+      const interval = setInterval(fetchTasks, 10000); // Reduced from 5s to 10s
       return () => clearInterval(interval);
     }
   }, [anonymousId, fetchTasks]);

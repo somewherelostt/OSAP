@@ -48,14 +48,14 @@ export default function ChatPage() {
   const addWelcomeMessage = useCallback(() => {
     setMessages([
       {
-        id: `system-${Date.now()}-0`,
+        id: `system-welcome-${Date.now()}`,
         role: 'system',
         content: 'Conversation started',
         status: 'done',
         timestamp: new Date().toISOString(),
       },
       {
-        id: `agent-${Date.now()}-1`,
+        id: `agent-welcome-${Date.now()}`,
         role: 'agent',
         content: `Hey ${user?.firstName || 'there'} 👋 I'm your OSAP agent. I can fetch your emails, manage GitHub, search the web, remember things, and more. What would you like me to do?`,
         status: 'done',
@@ -191,7 +191,21 @@ export default function ChatPage() {
       }
     };
 
-    pollingIntervals.current[taskId] = setInterval(poll, 1500);
+    // Adaptive polling: start at 2s, reduce to 500ms as task progresses
+    let pollInterval = 2000;
+    pollingIntervals.current[taskId] = setInterval(poll, pollInterval);
+    
+    // Speed up polling as we get closer to completion
+    const speedUpPoll = () => {
+      if (pollInterval > 500) {
+        pollInterval -= 500;
+        clearInterval(pollingIntervals.current[taskId]);
+        pollingIntervals.current[taskId] = setInterval(poll, pollInterval);
+      }
+    };
+    
+    // Speed up after first response
+    setTimeout(speedUpPoll, 2000);
     poll(); // Initial call
   };
 

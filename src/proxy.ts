@@ -1,5 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 
+// Routes that require authentication
 const isProtectedRoute = createRouteMatcher([
   '/agent(.*)',
   '/dev(.*)',
@@ -8,16 +9,29 @@ const isProtectedRoute = createRouteMatcher([
   '/profile(.*)',
 ]);
 
-// Named export 'proxy' is the new convention in Next.js 16
-export const proxy = clerkMiddleware((auth, req) => {
+// Named export 'proxy' is the requirement for Next.js 16
+export const proxy = clerkMiddleware(async (auth, req) => {
+  const { pathname } = req.nextUrl;
+
+  // 1. Skip all API routes in middleware to prevent double-processing and redirects
+  // API routes manage their own authentication internally
+  if (pathname.startsWith('/api/')) {
+    return;
+  }
+
+  // 2. Standard page protection
   if (isProtectedRoute(req)) {
-    auth.protect();
+    await auth.protect();
   }
 });
 
-// Also keep default export as a fallback
 export default proxy;
 
 export const config = {
-  matcher: ['/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)'],
+  matcher: [
+    // Standard Next.js/Clerk matcher
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Always run for API routes (though we bypass logic inside the proxy)
+    '/(api|trpc)(.*)',
+  ],
 };

@@ -148,6 +148,34 @@ export function formatStepResult(tool: string, result: any): string {
     return summary.trim();
   }
 
+  if (toolUpper.includes('GITHUB_CREATE_REPO') || toolUpper === 'GITHUB_CREATE_REPOSITORY') {
+    const name = data.name || data.full_name || 'Repository';
+    const url = data.html_url || data.url;
+    return `✓ Repository created: **${name}**\n${url}`;
+  }
+
+  if (toolUpper.includes('GOOGLECALENDAR_LIST_EVENTS') || toolUpper.includes('GOOGLECALENDAR_FIND_EVENT')) {
+    const items = data.items || (Array.isArray(data) ? data : []);
+    if (items.length === 0) return 'No calendar events found.';
+    let summary = `Found ${items.length} event${items.length > 1 ? 's' : ''}:\n`;
+    items.forEach((event: any, i: number) => {
+      const start = event.start?.dateTime || event.start?.date || 'Unknown time';
+      summary += `${i + 1}. **${event.summary || 'Untitled'}** (${new Date(start).toLocaleString()})\n`;
+    });
+    return summary.trim();
+  }
+
+  if (toolUpper.includes('NOTION_SEARCH') || toolUpper.includes('NOTION_LIST_PAGES')) {
+    const results = data.results || (Array.isArray(data) ? data : []);
+    if (results.length === 0) return 'No Notion pages found.';
+    let summary = `Found ${results.length} page${results.length > 1 ? 's' : ''}:\n`;
+    results.forEach((page: any, i: number) => {
+      const title = page.properties?.title?.title?.[0]?.plain_text || page.properties?.Name?.title?.[0]?.plain_text || 'Untitled';
+      summary += `${i + 1}. **${title}** (${page.url})\n`;
+    });
+    return summary.trim();
+  }
+
   if (typeof data === 'object' && data !== null) {
     try {
       // For Composio/Generic tools, if it's an object with messages, return a simple count/summary
@@ -272,14 +300,14 @@ export async function executeTask(
 
     console.log('[Executor] Memory context length:', memoryContext.length);
 
-    // Resolve Clerk ID for Composio binding
-    const { getClerkIdByInternalId } = await import('./database');
-    const clerkUserId = (await getClerkIdByInternalId(internalUserId)) || internalUserId;
-    console.log(`[Executor] Using clerkUserId: ${clerkUserId} for Composio tools`);
+    // Use internalUserId for Composio session (same as API routes like /api/composio/status)
+    // This ensures connections made in profile page are available in executor
+    const composioUserId = internalUserId;
+    console.log(`[Executor] Using composioUserId: ${composioUserId} for Composio tools`);
 
     const BUILT_IN_TOOLS = ['memory_store', 'memory_recall', 'http_request', 'github_create_issue', 'github_get_issues', 'email_send', 'twitter_post'];
 
-    const MAX_ITERATIONS = 4;
+    const MAX_ITERATIONS = 3; // Reduced from 4 - most tasks complete in 2-3 iterations
     let iterations = 0;
     let executionHistory: any[] = [];
     let stepResults: any[] = [];
@@ -333,35 +361,13 @@ export async function executeTask(
             result = await executeTool(step.tool, step.input || {}, internalUserId, DEFAULT_POLICY);
           } else {
             // Attempt Composio call
-            let composioResult = await executeComposioToolCall(clerkUserId, {
+            let composioResult = await executeComposioToolCall(composioUserId, {
               name: step.tool,
               parameters: step.input || {},
             });
 
-            // Retry logic
-            const errorMsg = composioResult.error?.message || "";
-            const errorCode = String((composioResult as any).error?.code || "");
-            
-            if (!composioResult.success && 
-                !(composioResult as any).authRequired && 
-                (errorCode === '4301' || 
-                 errorMsg.includes('4301') ||
-                 errorMsg.includes('not found') ||
-                 errorMsg.includes('Bad Request') || 
-                 errorMsg.includes('400')
-                )) {
-              console.log(`[Executor] Tool failed (${step.tool}), attempting semantic search fallback...`);
-              const searchResults = await searchTools(step.tool.replace(/_/g, ' '), 5, clerkUserId);
-              if (searchResults && searchResults.tools && searchResults.tools.length > 0) {
-                const bestMatch = searchResults.tools[0].name;
-                console.log(`[Executor] Found better match: ${bestMatch}. Retrying...`);
-                composioResult = await executeComposioToolCall(clerkUserId, {
-                  name: bestMatch,
-                  parameters: step.input || {},
-                });
-                step.tool = bestMatch;
-              }
-            }
+            // Skip slow semantic search fallback - rely on pre-populated mappings instead
+            // This saves ~2-5 seconds per failed tool
 
             // Check auth
             if ((composioResult as any).authRequired) {

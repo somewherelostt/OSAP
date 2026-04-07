@@ -343,9 +343,9 @@ export class ComposioToolRouter {
       this.validateId(sessionId, 'sessionId');
       const url = `${this.config.baseUrl}/api/v3/tool_router/session/${sessionId}/execute`;
 
-      // Normalization: Composio slugs are always lowercase. GLM might guess uppercase.
-      // We also handle common hallucinations like "google_gmail" or "gmail_get_emails"
-      let executionSlug = toolSlug.toLowerCase();
+      // Normalization: Most Composio v3 slugs use UPPERCASE, but some use lowercase.
+      // We will preserve the case unless it fails, but let's try to match known patterns.
+      let executionSlug = toolSlug;
       
       // Remove common app-name prefixes that might be added by the planner
       if (executionSlug.includes('_')) {
@@ -359,66 +359,85 @@ export class ComposioToolRouter {
       // Expand common guessed names to real slugs for the top 8 toolkits
       const mappings: Record<string, string> = {
         // Gmail
-        'gmail_get_emails': 'gmail_fetch_emails',
-        'gmail_get_messages': 'gmail_fetch_emails',
-        'gmail_fetch_messages': 'gmail_fetch_emails',
-        'gmail_list_messages': 'gmail_fetch_emails',
-        'gmail_get_last_emails': 'gmail_fetch_emails',
-        'google_gmail_list_messages': 'gmail_fetch_emails',
-        'gmail_get_email': 'gmail_fetch_message_by_message_id',
-        'gmail_read_email': 'gmail_fetch_message_by_message_id',
-        'gmail_fetch_message': 'gmail_fetch_message_by_message_id',
-        'gmail_get_message': 'gmail_fetch_message_by_message_id',
-        'gmail_send_message': 'gmail_send_email',
+        'gmail_get_emails': 'GMAIL_FETCH_EMAILS',
+        'gmail_get_messages': 'GMAIL_FETCH_EMAILS',
+        'gmail_fetch_messages': 'GMAIL_FETCH_EMAILS',
+        'gmail_list_messages': 'GMAIL_FETCH_EMAILS',
+        'gmail_get_last_emails': 'GMAIL_FETCH_EMAILS',
+        'google_gmail_list_messages': 'GMAIL_FETCH_EMAILS',
+        'gmail_get_email': 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID',
+        'gmail_read_email': 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID',
+        'gmail_fetch_message': 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID',
+        'gmail_get_message': 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID',
+        'gmail_send_message': 'GMAIL_SEND_EMAIL',
         
-        // GitHub
-        'github_get_issues': 'github_list_issues',
-        'github_fetch_issues': 'github_list_issues',
-        'github_create_issues': 'github_create_issue', 
-        'github_add_issue': 'github_create_issue',
-        'github_get_repo': 'github_get_repository',
+        // GitHub - Corrected tool slugs from Composio API
+        'github_get_issues': 'GITHUB_ISSUES_LIST_FOR_AUTHENTICATED_USER',
+        'github_list_issues': 'GITHUB_ISSUES_LIST_FOR_AUTHENTICATED_USER',
+        'github_fetch_issues': 'GITHUB_ISSUES_LIST_FOR_AUTHENTICATED_USER',
+        'github_issues': 'GITHUB_ISSUES_LIST_FOR_AUTHENTICATED_USER',
+        'github_create_issues': 'GITHUB_CREATE_AN_ISSUE', 
+        'github_add_issue': 'GITHUB_CREATE_AN_ISSUE',
+        'github_create_issue': 'GITHUB_CREATE_AN_ISSUE',
+        'github_create_repo': 'GITHUB_CREATE_A_REPOSITORY_FOR_THE_AUTHENTICATED_USER',
+        'github_create_repository': 'GITHUB_CREATE_A_REPOSITORY_FOR_THE_AUTHENTICATED_USER',
+        'github_get_repo': 'GITHUB_GET_A_REPOSITORY',
+        'github_get_repository': 'GITHUB_GET_A_REPOSITORY',
+        'github_create_or_update_file': 'GITHUB_CREATE_OR_UPDATE_FILE_CONTENTS',
+        'github_update_file': 'GITHUB_CREATE_OR_UPDATE_FILE_CONTENTS',
+        'github_create_file': 'GITHUB_CREATE_OR_UPDATE_FILE_CONTENTS',
+        'github_get_file_content': 'GITHUB_GET_A_BLOB',
+        'github_get_file': 'GITHUB_GET_A_BLOB',
+        'github_fetch_file': 'GITHUB_GET_A_BLOB',
+        'github_list_repos': 'GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER',
+        'github_get_repos': 'GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER',
+        'github_list_repositories': 'GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER',
         
-        // Notion
-        'notion_get_all_pages': 'notion_search',
-        'notion_fetch_pages': 'notion_search',
-        'notion_list_pages': 'notion_search',
-        'notion_get_pages': 'notion_search',
-        'notion_create_pages': 'notion_create_page',
-        'notion_add_page': 'notion_create_page',
+        // Notion - Corrected
+        'notion_get_all_pages': 'NOTION_SEARCH',
+        'notion_fetch_pages': 'NOTION_SEARCH',
+        'notion_list_pages': 'NOTION_SEARCH',
+        'notion_get_pages': 'NOTION_SEARCH',
+        'notion_create_pages': 'NOTION_PAGES_CREATE',
+        'notion_add_page': 'NOTION_PAGES_CREATE',
+        'notion_create_page': 'NOTION_PAGES_CREATE',
         
-        // Google Calendar
-        'calendar_get_events': 'googlecalendar_find_event',
-        'calendar_list_events': 'googlecalendar_find_event',
-        'google_calendar_list_events': 'googlecalendar_find_event',
-        'googlecalendar_get_events': 'googlecalendar_find_event',
-        'googlecalendar_list_events': 'googlecalendar_find_event',
-        'calendar_create_event': 'googlecalendar_create_event',
-        'googlecalendar_add_event': 'googlecalendar_create_event',
-        'googlecalendar_create_events': 'googlecalendar_create_event',
+        // Google Calendar - Corrected
+        'calendar_get_events': 'GOOGLECALENDAR_GET_EVENTS',
+        'calendar_list_events': 'GOOGLECALENDAR_GET_EVENTS',
+        'google_calendar_list_events': 'GOOGLECALENDAR_GET_EVENTS',
+        'googlecalendar_get_events': 'GOOGLECALENDAR_GET_EVENTS',
+        'googlecalendar_list_events': 'GOOGLECALENDAR_GET_EVENTS',
+        'calendar_create_event': 'GOOGLECALENDAR_CREATE_AN_EVENT',
+        'googlecalendar_add_event': 'GOOGLECALENDAR_CREATE_AN_EVENT',
+        'googlecalendar_create_events': 'GOOGLECALENDAR_CREATE_AN_EVENT',
         
-        // Slack
-        'slack_post_message': 'slack_send_message',
-        'slack_get_channel': 'slack_list_channels',
-        'slack_get_channels': 'slack_list_channels',
+        // Slack - Corrected
+        'slack_post_message': 'SLACK_SEND_MESSAGE',
+        'slack_get_channel': 'SLACK_LIST_CHANNELS',
+        'slack_get_channels': 'SLACK_LIST_CHANNELS',
+        'slack_list_channels': 'SLACK_LIST_CHANNELS',
         
-        // Discord
-        'discord_create_message': 'discord_send_message',
-        'discord_get_channels': 'discord_list_channels',
+        // Discord - Corrected
+        'discord_create_message': 'DISCORD_SEND_MESSAGE',
+        'discord_get_channels': 'DISCORD_LIST_CHANNELS',
+        'discord_list_channels': 'DISCORD_LIST_CHANNELS',
         
-        // Twitter (X)
-        'twitter_post_tweet': 'twitter_create_tweet',
-        'twitter_send_tweet': 'twitter_create_tweet',
-        'x_create_tweet': 'twitter_create_tweet',
-        'x_post_tweet': 'twitter_create_tweet',
+        // Twitter (X) - Corrected
+        'twitter_post_tweet': 'TWITTER_CREATE_TWEET',
+        'twitter_send_tweet': 'TWITTER_CREATE_TWEET',
+        'x_create_tweet': 'TWITTER_CREATE_TWEET',
+        'x_post_tweet': 'TWITTER_CREATE_TWEET',
         
-        // Linear
-        'linear_create_issues': 'linear_create_issue',
-        'linear_fetch_issues': 'linear_list_issues',
-        'linear_get_issues': 'linear_list_issues',
+        // Linear - Corrected
+        'linear_create_issues': 'LINEAR_CREATE_ISSUE',
+        'linear_fetch_issues': 'LINEAR_LIST_ISSUES',
+        'linear_get_issues': 'LINEAR_LIST_ISSUES',
       };
       
-      if (mappings[executionSlug]) {
-        executionSlug = mappings[executionSlug];
+      const lowerSlug = executionSlug.toLowerCase();
+      if (mappings[lowerSlug]) {
+        executionSlug = mappings[lowerSlug];
       }
 
       const response = await fetch(url, {

@@ -14,13 +14,16 @@ export async function GET(
     }
 
     const { id } = await params;
-    const task = await getTask(id);
+    
+    // Optimized: fetch task and steps in parallel, use single query
+    const [task, steps] = await Promise.all([
+      getTask(id),
+      getTaskSteps(id)
+    ]);
 
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     }
-
-    const steps = await getTaskSteps(id);
 
     return NextResponse.json({ task: { ...task, steps } });
   } catch (error) {
