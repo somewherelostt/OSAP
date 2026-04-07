@@ -121,11 +121,11 @@ export default function HomePage() {
                 <a href="#features" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
                   Features
                 </a>
-                <Link href="/home" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                <Link href="/chat" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
                   App
                 </Link>
               </div>
-              <Link href="/home">
+              <Link href="/chat">
                 <Button size="sm" className="rounded-full">
                   Get Started
                 </Button>
@@ -204,7 +204,7 @@ bun install osap
               Join the future of personal computing. Your agent is waiting.
             </p>
             <div className="flex flex-col sm:flex-row gap-4">
-              <Link href="/home">
+              <Link href="/chat">
                 <Button size="lg" className="rounded-xl">
                   Start Building
                 </Button>

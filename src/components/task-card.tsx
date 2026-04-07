@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/status-badge';
 import { FormattedResult } from '@/components/formatted-result';
-import { cn } from '@/lib/utils';
+import { cn, getHumanReadableToolName, cleanDescription } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface Step {
@@ -156,6 +156,8 @@ export function TaskCard({ task, initiallyExpanded = false }: TaskCardProps) {
     if (t.includes('http')) return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
     return 'bg-muted text-muted-foreground border-border';
   };
+
+
 
   const getStatusBorderColor = (status: string) => {
     switch (status) {
@@ -414,9 +416,11 @@ export function TaskCard({ task, initiallyExpanded = false }: TaskCardProps) {
                         >
                           <div className="flex items-center gap-3 min-w-0">
                             <Badge className={cn("px-2 py-0 h-5 text-[9px] font-bold uppercase tracking-tight", getToolBadgeStyles(s.step.tool))}>
-                              {s.step.tool.replace(/_/g, ' ')}
+                              {getHumanReadableToolName(s.step.tool)}
                             </Badge>
-                            <span className="text-[12px] font-medium text-foreground truncate">{s.step.description}</span>
+                            <span className="text-[12px] font-medium text-foreground truncate">
+                              {cleanDescription(s.step.description, s.step.tool)}
+                            </span>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             {s.status === 'success' ? (

@@ -1,38 +1,44 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useUser, useClerk, UserButton } from '@clerk/nextjs';
 import { useTheme } from 'next-themes';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { SectionHeader } from '@/components/section-header';
-import { useRouter } from 'next/navigation';
 import {
   User,
   Mail,
-  Bell,
   Moon,
   Shield,
   Palette,
   LogOut,
-  ChevronDown,
   ChevronRight,
-  ChevronUp,
   Zap,
-  Clock,
   Loader2,
   Check,
-  Link2,
-  Globe,
-  MessageSquare,
-  Calendar,
-  X,
-  Database,
+  Search,
+  ArrowRight,
+  Info,
+  Layers,
 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+
+interface Toolkit {
+  slug: string;
+  name: string;
+  description: string;
+  logo?: string;
+  category?: string;
+  authSchemes: string[];
+  connection?: {
+    is_active: boolean;
+    connected_account?: any;
+  } | null;
+}
 
 interface UserStats {
   tasksCompleted: number;
@@ -49,66 +55,25 @@ interface RecentTask {
   updated_at: string;
 }
 
-interface EmailPreferences {
-  taskEmails: boolean;
-  memoryDigest: boolean;
-  weeklySummary: boolean;
-}
-
-const ACCENT_COLORS = [
-  { name: 'Violet', value: '#8b5cf6' },
-  { name: 'Blue', value: '#3b82f6' },
-  { name: 'Emerald', value: '#10b981' },
-  { name: 'Orange', value: '#f97316' },
-  { name: 'Rose', value: '#f43f5e' },
-  { name: 'Amber', value: '#f59e0b' },
-];
-
 const settingsSections = [
   {
     title: 'Account',
     items: [
-      {
-        id: 'profile-info',
-        icon: User,
-        label: 'Profile Information',
-        description: 'Update your profile details',
-      },
-      {
-        id: 'email-prefs',
-        icon: Mail,
-        label: 'Email Preferences',
-        description: 'Manage notification emails',
-      },
+      { id: 'profile-info', icon: User, label: 'Profile Information', description: 'Update your profile details' },
+      { id: 'email-prefs', icon: Mail, label: 'Email Preferences', description: 'Manage notification emails' },
     ],
   },
   {
     title: 'Appearance',
     items: [
-      {
-        id: 'dark-mode',
-        icon: Moon,
-        label: 'Dark Mode',
-        description: 'Toggle dark/light theme',
-        hasSwitch: true,
-      },
-      {
-        id: 'accent-color',
-        icon: Palette,
-        label: 'Accent Color',
-        description: 'Primary color for UI',
-      },
+      { id: 'dark-mode', icon: Moon, label: 'Dark Mode', description: 'Toggle dark/light theme', hasSwitch: true },
+      { id: 'accent-color', icon: Palette, label: 'Accent Color', description: 'Primary color for UI' },
     ],
   },
   {
     title: 'Security',
     items: [
-      {
-        id: '2fa',
-        icon: Shield,
-        label: 'Two-Factor Authentication',
-        description: 'Add extra security',
-      },
+      { id: '2fa', icon: Shield, label: 'Two-Factor Authentication', description: 'Add extra security' },
     ],
   },
 ];
@@ -116,23 +81,20 @@ const settingsSections = [
 export default function ProfilePage() {
   const { user, isLoaded } = useUser();
   const { signOut, openUserProfile } = useClerk();
-  const { theme, setTheme, resolvedTheme } = useTheme();
-  const router = useRouter();
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  
   const [stats, setStats] = useState<UserStats>({ tasksCompleted: 0, memoriesStored: 0, activeTime: '0h' });
-  const [recentTasks, setRecentTasks] = useState<RecentTask[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [appLoading, setAppLoading] = useState(true);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
-  const [emailPrefs, setEmailPrefs] = useState<EmailPreferences>({
-    taskEmails: false,
-    memoryDigest: false,
-    weeklySummary: false,
-  });
-  const [emailPrefsLoading, setEmailPrefsLoading] = useState(false);
-  const [emailPrefsError, setEmailPrefsError] = useState(false);
-  const [accentColor, setAccentColor] = useState<string>('#8b5cf6');
-  const [connectedToolkits, setConnectedToolkits] = useState<{ connected: string[]; available: string[] }>({ connected: [], available: [] });
-  const [toolkitsLoading, setToolkitsLoading] = useState(false);
+  
+  const [toolkits, setToolkits] = useState<Toolkit[]>([]);
+  const [connectedSlugs, setConnectedSlugs] = useState<string[]>([]);
+  const [toolkitsLoading, setToolkitsLoading] = useState(true);
+  const [toolkitsError, setToolkitsError] = useState<string | null>(null);
   const [connectingToolkit, setConnectingToolkit] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [visibleCount, setVisibleCount] = useState(20);
 
   const fetchStats = useCallback(async () => {
     if (!user?.id) return;
@@ -145,549 +107,438 @@ export default function ProfilePage() {
       const tasksData = await tasksRes.json();
       const memoryData = await memoryRes.json();
       const tasks: RecentTask[] = tasksData.tasks || [];
-      const memories: unknown[] = memoryData.memories || [];
+      const memories: any[] = memoryData.memories || [];
 
-      const doneTasks = tasks.filter(t => t.status === 'done');
-      const completedCount = doneTasks.length;
-      const memoriesCount = memories.length;
-
-      const totalMs = tasks.reduce((acc, task) => {
+      const completedCount = tasks.filter(t => t.status === 'done').length;
+      const hours = Math.round(tasks.reduce((acc, task) => {
         if (task.updated_at && task.created_at) {
-          const diff = new Date(task.updated_at).getTime() - new Date(task.created_at).getTime();
-          return acc + Math.max(0, diff);
+          return acc + (new Date(task.updated_at).getTime() - new Date(task.created_at).getTime());
         }
         return acc;
-      }, 0);
-      const hours = Math.round(totalMs / 3600000);
+      }, 0) / 3600000);
 
       setStats({
         tasksCompleted: completedCount,
-        memoriesStored: memoriesCount,
-        activeTime: hours > 0 ? `${hours}h` : '0h',
+        memoriesStored: memories.length,
+        activeTime: `${hours}h`,
       });
-
-      setRecentTasks(tasks.slice(0, 5));
     } catch (error) {
       console.error('[Profile] Error fetching stats:', error);
     }
   }, [user?.id]);
 
-  const fetchEmailPreferences = useCallback(async () => {
-    try {
-      const res = await fetch('/api/profile/preferences');
-      if (!res.ok) throw new Error('Failed to fetch preferences');
-      const data = await res.json();
-      setEmailPrefs(data.preferences);
-      setEmailPrefsError(false);
-    } catch (error) {
-      console.error('[Profile] Error fetching preferences:', error);
-      setEmailPrefsError(true);
-      // Silently fall back to default values
-      setEmailPrefs({
-        taskEmails: false,
-        memoryDigest: false,
-        weeklySummary: false,
-      });
-    }
-  }, []);
-
   const fetchConnectedToolkits = useCallback(async () => {
+    setToolkitsLoading(true);
+    setToolkitsError(null);
     try {
       const res = await fetch('/api/composio/status');
-      if (!res.ok) return;
-      const data = await res.json();
-      setConnectedToolkits({ connected: data.connected || [], available: data.available || [] });
-    } catch (error) {
-      console.error('[Profile] Error fetching connected toolkits:', error);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isLoaded && user?.id) {
-      Promise.all([fetchStats(), fetchEmailPreferences(), fetchConnectedToolkits()]).finally(() => setLoading(false));
-    }
-  }, [isLoaded, user?.id, fetchStats, fetchEmailPreferences, fetchConnectedToolkits]);
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'COMPOSIO_CONNECTED') {
-        fetchConnectedToolkits();
+      if (!res.ok) {
+        setToolkitsError(`Server returned status ${res.status}.`);
+        return;
       }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [fetchConnectedToolkits]);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('osap-accent-color');
-    if (saved) {
-      setAccentColor(saved);
-      document.documentElement.style.setProperty('--accent', saved);
+      const data = await res.json();
+      if (data.error) {
+        setToolkitsError(data.error);
+        return;
+      }
+      const fetchedToolkits = data.toolkits || [];
+      setToolkits(fetchedToolkits);
+      setConnectedSlugs(data.connected || []);
+      
+      if (fetchedToolkits.length === 0) {
+        setToolkitsError('No toolkits available in library.');
+      }
+    } catch (error) {
+      console.error('[Profile] Error fetching toolkits:', error);
+      setToolkitsError('Failed to load toolkit catalog.');
+    } finally {
+      setToolkitsLoading(false);
     }
   }, []);
 
-  const handleDarkModeToggle = (checked: boolean) => {
-    setTheme(checked ? 'dark' : 'light');
-  };
-
-  const handleEmailPrefToggle = async (key: keyof EmailPreferences, value: boolean) => {
-    const previousPrefs = { ...emailPrefs };
-    setEmailPrefs(prev => ({ ...prev, [key]: value }));
-    setEmailPrefsLoading(true);
-    try {
-      const res = await fetch('/api/profile/preferences', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, value }),
-      });
-      if (!res.ok) throw new Error('Update failed');
-    } catch (error) {
-      console.error('[Profile] Error updating preference:', error);
-      setEmailPrefs(previousPrefs);
-    } finally {
-      setEmailPrefsLoading(false);
+  useEffect(() => {
+    setMounted(true);
+    if (isLoaded && user?.id) {
+      Promise.all([fetchStats(), fetchConnectedToolkits()]).finally(() => setAppLoading(false));
+    } else if (isLoaded && !user) {
+      setAppLoading(false);
     }
-  };
+  }, [isLoaded, user?.id, user, fetchStats, fetchConnectedToolkits]);
 
-  const handleAccentColorSelect = (color: string) => {
-    setAccentColor(color);
-    localStorage.setItem('osap-accent-color', color);
-    document.documentElement.style.setProperty('--accent', color);
-  };
+  const filteredToolkits = useMemo(() => {
+    return toolkits
+      .filter((t) => {
+        const query = searchQuery.toLowerCase();
+        return t.name.toLowerCase().includes(query) || t.slug.toLowerCase().includes(query);
+      })
+      .sort((a, b) => {
+        const aConnected = connectedSlugs.includes(a.slug) ? 1 : 0;
+        const bConnected = connectedSlugs.includes(b.slug) ? 1 : 0;
+        return bConnected - aConnected;
+      });
+  }, [toolkits, searchQuery, connectedSlugs]);
 
-  const handleSignOut = async () => {
-    await signOut();
-    router.push('/');
-  };
-
-  const handleConnectToolkit = async (toolkit: string) => {
-    setConnectingToolkit(toolkit);
+  const handleConnectToolkit = async (slug: string) => {
+    console.log('[Profile] Connecting:', slug);
+    setConnectingToolkit(slug);
     try {
-      const res = await fetch(`/api/composio/connect?toolkit=${toolkit}`);
-      if (!res.ok) throw new Error('Failed to get auth URL');
+      const res = await fetch('/api/composio/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toolkit: slug }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Connection failed: ${res.statusText}`);
+      }
+
       const data = await res.json();
       if (data.authUrl) {
-        window.open(data.authUrl, '_blank', 'width=600,height=700');
-        setTimeout(() => fetchConnectedToolkits(), 5000);
+        console.log('[Profile] Opening auth URL:', data.authUrl);
+        window.open(data.authUrl, '_blank');
+        setTimeout(fetchConnectedToolkits, 5000);
       }
-    } catch (error) {
-      console.error('[Profile] Error connecting toolkit:', error);
+    } catch (error: any) {
+      console.error('[Profile] Connection error:', error);
+      alert(error.message || 'Failed to initiate connection. Please try again.');
     } finally {
       setConnectingToolkit(null);
     }
   };
 
-  const handleDisconnectToolkit = async (toolkit: string) => {
+  const handleDisconnectToolkit = async (slug: string) => {
+    console.log('[Profile] Disconnecting:', slug);
     try {
-      await fetch(`/api/composio/connect?toolkit=${toolkit}`, { method: 'DELETE' });
+      await fetch('/api/composio/connect', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toolkit: slug }),
+      });
       fetchConnectedToolkits();
     } catch (error) {
-      console.error('[Profile] Error disconnecting toolkit:', error);
+      console.error('[Profile] Disconnect error:', error);
     }
   };
 
-  const toggleSection = (id: string) => {
-    setExpandedSection(expandedSection === id ? null : id);
-  };
-
-  const isDarkMode = resolvedTheme === 'dark';
-
-  if (!isLoaded || loading) {
+  if (!isLoaded || appLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      <div className="flex flex-col items-center justify-center min-h-[80vh] gap-4">
+        <Loader2 className="size-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground font-medium">Loading your profile...</p>
       </div>
     );
   }
 
-  const initials = user?.firstName && user?.lastName
+  const initials = user?.firstName && user?.lastName 
     ? `${user.firstName[0]}${user.lastName[0]}`
-    : user?.firstName?.[0] || user?.emailAddresses?.[0]?.emailAddress?.[0]?.toUpperCase() || 'U';
-
-  const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'done':
-      case 'success':
-        return <Badge className="bg-green-500/10 text-green-500 border-green-500/20">Done</Badge>;
-      case 'pending':
-        return <Badge className="bg-yellow-500/10 text-yellow-500 border-yellow-500/20">Pending</Badge>;
-      case 'failed':
-        return <Badge className="bg-red-500/10 text-red-500 border-red-500/20">Failed</Badge>;
-      default:
-        return <Badge variant="secondary">{status}</Badge>;
-    }
-  };
+    : user?.firstName ? user.firstName[0] : 'U';
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-8 px-4 sm:px-6 lg:px-8 py-10 pb-32">
+      {/* Top Header */}
       <div className="flex items-center justify-between">
-        <div className="space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight">Profile</h1>
-          <p className="text-muted-foreground text-sm">
-            Manage your account and preferences
-          </p>
+        <div className="space-y-1">
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Profile</h1>
+          <p className="text-muted-foreground text-sm">Manage your OSAP account and integration preferences</p>
         </div>
-        <UserButton />
+        <div className="relative z-50">
+          <UserButton />
+        </div>
       </div>
 
-      <Card className="p-6 rounded-2xl border-border/50 bg-card">
-        <div className="flex items-center gap-4">
-          <Avatar className="size-16 rounded-2xl">
+      {/* Profile Card */}
+      <Card className="p-6 rounded-[2rem] border-border/50 bg-card/50 shadow-sm backdrop-blur-sm">
+        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
+          <Avatar className="size-20 rounded-3xl shadow-lg border-4 border-background">
             <AvatarImage src={user?.imageUrl} />
-            <AvatarFallback className="rounded-2xl bg-primary/10 text-primary font-semibold">
+            <AvatarFallback className="rounded-3xl bg-primary/10 text-primary text-xl font-bold">
               {initials}
             </AvatarFallback>
           </Avatar>
-          <div className="flex-1">
-            <h2 className="font-semibold text-lg">
-              {user?.fullName || 'OSAP User'}
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              {user?.primaryEmailAddress?.emailAddress || 'No email'}
-            </p>
-            <Badge variant="secondary" className="mt-2 bg-primary/10 text-primary">
-              <Zap className="size-3 mr-1" />
-              Pro Plan
-            </Badge>
+          <div className="flex-1 text-center sm:text-left space-y-2">
+            <div>
+              <h2 className="font-bold text-2xl text-foreground">{user?.fullName || 'OSAP User'}</h2>
+              <p className="text-sm text-muted-foreground font-medium">{user?.primaryEmailAddress?.emailAddress || 'No account email'}</p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+              <Badge variant="secondary" className="bg-primary/10 text-primary border-none text-[10px] uppercase tracking-widest font-bold h-6">
+                <Zap className="size-3 mr-1.5" />
+                Developer Tier
+              </Badge>
+              <Badge variant="outline" className="text-[10px] uppercase tracking-widest font-bold h-6 border-border/50 text-muted-foreground">
+                Beta Access
+              </Badge>
+            </div>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="rounded-xl"
+          <Button 
+            variant="outline" 
+            className="rounded-2xl border-border/50 shadow-none hover:bg-muted font-bold px-6 h-11" 
             onClick={() => openUserProfile()}
           >
-            Edit
+            Manage Identity
           </Button>
         </div>
       </Card>
 
-      <div className="grid grid-cols-3 gap-3">
-        <Card className="p-4 rounded-2xl border-border/50 bg-card text-center">
-          <p className="text-2xl font-bold">{stats.tasksCompleted}</p>
-          <p className="text-xs text-muted-foreground">Tasks Completed</p>
-        </Card>
-        <Card className="p-4 rounded-2xl border-border/50 bg-card text-center">
-          <p className="text-2xl font-bold">{stats.memoriesStored}</p>
-          <p className="text-xs text-muted-foreground">Memories Stored</p>
-        </Card>
-        <Card className="p-4 rounded-2xl border-border/50 bg-card text-center">
-          <p className="text-2xl font-bold">{stats.activeTime}</p>
-          <p className="text-xs text-muted-foreground">Active Time</p>
-        </Card>
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard value={stats.tasksCompleted} label="Tasks Completed" />
+        <StatCard value={stats.memoriesStored} label="Memories Stored" />
+        <StatCard value={stats.activeTime} label="Active Session Time" />
       </div>
 
-      <div id="connected-toolkits" className="space-y-3">
-        <SectionHeader title="Connected Toolkits" />
-        <Card className="p-4 rounded-2xl border-border/50 bg-card">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {[
-              { id: 'gmail', name: 'Gmail', icon: Mail, color: 'bg-red-500' },
-              { id: 'github', name: 'GitHub', icon: Globe, color: 'bg-gray-800' },
-              { id: 'slack', name: 'Slack', icon: MessageSquare, color: 'bg-purple-600' },
-              { id: 'googlecalendar', name: 'Google Calendar', icon: Calendar, color: 'bg-blue-500' },
-              { id: 'twitter', name: 'Twitter / X', icon: X, color: 'bg-sky-500' },
-              { id: 'notion', name: 'Notion', icon: Database, color: 'bg-black' },
-            ].map((app) => {
-              const isConnected = connectedToolkits.connected.includes(app.id);
-              const isLoading = connectingToolkit === app.id;
-              return (
-                <div key={app.id} className="flex items-center gap-3 p-3 rounded-xl border border-border/50 bg-muted/30">
-                  <div className={`size-9 rounded-lg ${app.color} flex items-center justify-center shrink-0`}>
-                    <app.icon className="size-4 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{app.name}</p>
-                    {isConnected ? (
-                      <p className="text-xs text-green-500">Connected</p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">Not connected</p>
-                    )}
-                  </div>
-                  {isConnected ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-xs text-destructive hover:text-destructive h-7 px-2"
-                      onClick={() => handleDisconnectToolkit(app.id)}
-                    >
-                      Disconnect
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs h-7 px-2"
-                      onClick={() => handleConnectToolkit(app.id)}
-                      disabled={isLoading || toolkitsLoading}
-                    >
-                      {isLoading ? <Loader2 className="size-3 animate-spin" /> : 'Connect'}
-                    </Button>
-                  )}
+      {/* Toolkits Catalog */}
+      <div id="connected-toolkits" className="space-y-6 pt-6 border-t border-border/40">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <SectionHeader title="Available Toolkits" />
+          <div className="relative w-full md:w-96">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-muted-foreground opacity-40" />
+            <Input
+              placeholder="Search 250+ integrations (GitHub, Gmail...)"
+              className="pl-11 bg-card border-border/50 rounded-2xl h-12 shadow-none focus-visible:ring-primary/20 border-2"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setVisibleCount(20);
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="min-h-[300px]">
+          {toolkitsLoading && toolkits.length === 0 ? (
+            <div className="py-32 flex flex-col items-center justify-center gap-4">
+              <Loader2 className="size-10 animate-spin text-primary/30" />
+              <p className="text-sm text-muted-foreground font-semibold animate-pulse">Scanning Composio ecosystem...</p>
+            </div>
+          ) : toolkitsError ? (
+            <div className="py-24 px-8 text-center rounded-[2.5rem] border-2 border-destructive/20 bg-destructive/[0.01] border-dashed space-y-6">
+              <div className="size-20 rounded-full bg-destructive/10 mx-auto flex items-center justify-center">
+                <Info className="size-10 text-destructive" />
+              </div>
+              <div className="space-y-2">
+                 <p className="text-xl font-black text-foreground tracking-tight">Toolkit Sync Interrupted</p>
+                 <p className="text-sm text-muted-foreground max-w-sm mx-auto font-medium">{toolkitsError}</p>
+              </div>
+              <Button size="lg" className="rounded-2xl px-12 font-bold" onClick={fetchConnectedToolkits}>
+                Force Refresh
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                {filteredToolkits.slice(0, visibleCount).map((app) => (
+                  <ToolkitCard
+                    key={app.slug}
+                    app={app}
+                    isConnected={connectedSlugs.includes(app.slug)}
+                    isFeatured={['gmail', 'github', 'slack', 'googlecalendar', 'twitter', 'notion'].includes(app.slug)}
+                    handleConnect={handleConnectToolkit}
+                    handleDisconnect={handleDisconnectToolkit}
+                    connectingToolkit={connectingToolkit}
+                    toolkitsLoading={toolkitsLoading}
+                  />
+                ))}
+              </div>
+
+              {filteredToolkits.length > visibleCount && (
+                <div className="flex justify-center pt-4">
+                  <Button
+                    variant="outline"
+                    className="rounded-2xl px-12 py-7 border-2 border-border/50 hover:bg-muted/50 transition-all font-bold group shadow-none"
+                    onClick={() => setVisibleCount(prev => prev + 20)}
+                  >
+                    Load More Toolkits
+                    <ArrowRight className="size-5 ml-3 group-hover:translate-x-1 transition-transform" />
+                  </Button>
                 </div>
-              );
-            })}
+              )}
+
+              {filteredToolkits.length === 0 && (
+                <div className="py-24 text-center rounded-[2.5rem] border-2 border-dashed border-border/20 bg-muted/5">
+                  <div className="size-24 rounded-full bg-muted/50 mx-auto flex items-center justify-center mb-6">
+                    <Search className="size-12 text-muted-foreground opacity-20" />
+                  </div>
+                  <h3 className="text-xl font-bold text-foreground">No integrations found</h3>
+                  <p className="text-sm text-muted-foreground mt-2 mb-8 font-medium">We couldn&apos;t find any tool matching &quot;{searchQuery}&quot;</p>
+                  <Button variant="outline" className="rounded-2xl px-8 h-12 font-bold border-2" onClick={() => setSearchQuery('')}>
+                    Reset Search
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-8 p-6 rounded-[2rem] bg-muted/30 border-2 border-border/20 text-[12px] text-muted-foreground flex gap-5 items-start">
+          <Info className="size-6 shrink-0 text-primary/50" />
+          <div className="space-y-1">
+            <p className="leading-relaxed font-medium">
+              Toolkit integration allows your OSAP agent to securely perform cross-platform actions. 
+              <strong> All credentials are encrypted and stored solely within the Composio infrastructure.</strong>
+            </p>
           </div>
-          <div className="mt-3 p-3 rounded-lg bg-muted/50 text-xs text-muted-foreground">
-            <Link2 className="size-3 inline mr-1" />
-            Connect toolkits so your AI agent can fetch emails, create GitHub issues, send messages, and more. Once connected, just ask naturally — &quot;fetch my last 2 emails&quot; or &quot;create a GitHub issue&quot;.
-          </div>
-        </Card>
+        </div>
       </div>
 
-      <div className="space-y-6">
-        <SectionHeader title="Settings" />
-
-        {settingsSections.map((section) => (
-          <div key={section.title} className="space-y-3">
-            <h3 className="text-sm font-medium text-muted-foreground px-1">
-              {section.title}
-            </h3>
-            <Card className="rounded-2xl border-border/50 bg-card overflow-hidden">
-              {section.items.map((item, index) => (
-                <div key={item.id}>
-                  {item.id === 'dark-mode' ? (
-                    <div className="flex items-center justify-between p-4 hover:bg-accent/50 transition-colors">
-                      <div className="flex items-center gap-3">
-                        <div className="size-9 rounded-xl bg-muted flex items-center justify-center">
-                          <item.icon className="size-4 text-muted-foreground" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-sm">{item.label}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {item.description}
-                          </p>
-                        </div>
-                      </div>
-                      <Switch
-                        checked={isDarkMode}
-                        onCheckedChange={handleDarkModeToggle}
-                      />
-                    </div>
-                  ) : item.id === '2fa' ? (
-                    <div className="flex items-center justify-between p-4 hover:bg-accent/50 transition-colors">
-                      <div className="flex items-center gap-3">
-                        <div className="size-9 rounded-xl bg-muted flex items-center justify-center">
-                          <item.icon className="size-4 text-muted-foreground" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-sm">{item.label}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {item.description}
-                          </p>
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="rounded-xl text-xs"
-                        onClick={() => openUserProfile()}
-                      >
-                        Enable
-                      </Button>
-                    </div>
-                  ) : (
-                    <div
-                      className="flex items-center justify-between p-4 hover:bg-accent/50 transition-colors cursor-pointer"
-                      onClick={() => toggleSection(item.id)}
+      {/* Settings Sections */}
+      <div className="space-y-6 pt-6 border-t border-border/40">
+        <SectionHeader title="Account Settings" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {settingsSections.map((section) => (
+             <Card key={section.title} className="p-6 rounded-[2rem] border-border/50 bg-card/30 shadow-none border-2">
+                <h3 className="text-[11px] uppercase tracking-[0.2em] font-black text-muted-foreground/60 mb-6 flex items-center gap-2">
+                  {section.title}
+                </h3>
+                <div className="space-y-3">
+                  {section.items.map((item) => (
+                    <div 
+                      key={item.id} 
+                      className={`flex items-center justify-between p-4 rounded-2xl transition-all duration-200 group border-2 border-transparent ${item.hasSwitch ? 'cursor-default' : 'cursor-pointer hover:bg-muted hover:border-border/30'}`}
+                      onClick={() => {
+                        if (!item.hasSwitch) {
+                          setExpandedSection(expandedSection === item.id ? null : item.id);
+                        }
+                      }}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="size-9 rounded-xl bg-muted flex items-center justify-center">
-                          <item.icon className="size-4 text-muted-foreground" />
+                      <div className="flex items-center gap-5">
+                        <div className="size-12 rounded-xl bg-muted/80 flex items-center justify-center text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary transition-all">
+                          <item.icon className="size-6" />
                         </div>
                         <div>
-                          <p className="font-medium text-sm">{item.label}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {item.description}
-                          </p>
+                          <p className="text-sm font-bold leading-tight text-foreground">{item.label}</p>
+                          <p className="text-[12px] text-muted-foreground mt-0.5 font-medium">{item.description}</p>
                         </div>
                       </div>
                       {item.hasSwitch ? (
-                        <Switch
-                          checked={item.id === 'dark-mode' ? isDarkMode : false}
-                          onCheckedChange={(checked) => {
-                            if (item.id === 'dark-mode') handleDarkModeToggle(checked);
-                          }}
-                        />
+                        <div className="relative z-10" onClick={(e) => e.stopPropagation()}>
+                          <Switch 
+                            checked={mounted && theme === 'dark'}
+                            onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')} 
+                            className="data-[state=checked]:bg-primary"
+                          />
+                        </div>
                       ) : (
-                        expandedSection === item.id ? (
-                          <ChevronUp className="size-4 text-muted-foreground" />
-                        ) : (
-                          <ChevronDown className="size-4 text-muted-foreground" />
-                        )
+                        <ChevronRight className={`size-5 text-muted-foreground/30 transition-transform duration-300 ${expandedSection === item.id ? 'rotate-90 text-primary' : ''}`} />
                       )}
                     </div>
-                  )}
-                  {index < section.items.length - 1 && <Separator className="mx-4" />}
-
-                  {expandedSection === 'profile-info' && item.id === 'profile-info' && (
-                    <div className="p-4 bg-muted/30 border-t border-border">
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Shield className="size-3" />
-                          Managed by Clerk
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="text-xs text-muted-foreground">Name</label>
-                            <p className="text-sm font-medium">{user?.fullName || 'Not set'}</p>
-                          </div>
-                          <div>
-                            <label className="text-xs text-muted-foreground">Email</label>
-                            <p className="text-sm font-medium">{user?.primaryEmailAddress?.emailAddress || 'Not set'}</p>
-                          </div>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="rounded-xl text-xs"
-                          onClick={() => openUserProfile()}
-                        >
-                          Edit in Clerk
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {expandedSection === 'email-prefs' && item.id === 'email-prefs' && (
-                    <div className="p-4 bg-muted/30 border-t border-border space-y-3">
-                      {emailPrefsError && (
-                        <p className="text-xs text-amber-500 mb-2">Could not load preferences. Using defaults.</p>
-                      )}
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">Task completion emails</p>
-                          <p className="text-xs text-muted-foreground">Get notified when tasks finish</p>
-                        </div>
-                        <Switch
-                          checked={emailPrefs.taskEmails}
-                          onCheckedChange={(v) => handleEmailPrefToggle('taskEmails', v)}
-                          disabled={emailPrefsLoading || emailPrefsError}
-                        />
-                      </div>
-                      <Separator />
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">Memory digest emails</p>
-                          <p className="text-xs text-muted-foreground">Weekly summary of stored memories</p>
-                        </div>
-                        <Switch
-                          checked={emailPrefs.memoryDigest}
-                          onCheckedChange={(v) => handleEmailPrefToggle('memoryDigest', v)}
-                          disabled={emailPrefsLoading || emailPrefsError}
-                        />
-                      </div>
-                      <Separator />
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">Weekly summary</p>
-                          <p className="text-xs text-muted-foreground">A weekly recap of your activity</p>
-                        </div>
-                        <Switch
-                          checked={emailPrefs.weeklySummary}
-                          onCheckedChange={(v) => handleEmailPrefToggle('weeklySummary', v)}
-                          disabled={emailPrefsLoading || emailPrefsError}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {expandedSection === 'accent-color' && item.id === 'accent-color' && (
-                    <div className="p-4 bg-muted/30 border-t border-border">
-                      <p className="text-xs text-muted-foreground mb-3">Choose an accent color</p>
-                      <div className="flex gap-2 flex-wrap">
-                        {ACCENT_COLORS.map((color) => (
-                          <button
-                            key={color.value}
-                            onClick={() => handleAccentColorSelect(color.value)}
-                            className="size-8 rounded-full flex items-center justify-center transition-all"
-                            style={{ backgroundColor: color.value }}
-                            title={color.name}
-                          >
-                            {accentColor === color.value && (
-                              <Check className="size-4 text-white" />
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  ))}
                 </div>
-              ))}
-            </Card>
-          </div>
-        ))}
+             </Card>
+          ))}
+        </div>
       </div>
+      
+      {/* Sign Out Action */}
+      <div className="pt-12">
+        <Button 
+          variant="outline" 
+          className="w-full rounded-2xl border-destructive/20 text-destructive hover:bg-destructive/5 hover:border-destructive/40 py-8 font-black text-lg transition-all shadow-none group"
+          onClick={() => {
+            console.log('[Profile] Signing out...');
+            signOut().catch(err => console.error('[Profile] Sign out failed:', err));
+          }}
+        >
+          <LogOut className="size-6 mr-3 group-hover:scale-110 transition-transform" />
+          Terminate OSAP Session
+        </Button>
+        <p className="text-center text-[11px] text-muted-foreground mt-4 font-bold uppercase tracking-widest opacity-40">
+          Build 0.1.4-beta • Made with love at OSAP
+        </p>
+      </div>
+    </div>
+  );
+}
 
-      <div className="space-y-3">
-        <SectionHeader title="Recent Activity" />
-        <Card className="p-4 rounded-2xl border-border/50 bg-card">
-          <div className="space-y-3">
-            {recentTasks.length > 0 ? (
-              recentTasks.map((task, index) => (
-                <div key={task.id}>
-                  <button
-                    className="w-full flex items-center gap-3 text-left hover:bg-accent/30 rounded-lg p-2 -m-2 transition-colors"
-                    onClick={() => router.push(`/tasks?id=${task.id}`)}
-                  >
-                    <div className={`size-8 rounded-lg flex items-center justify-center ${
-                      task.status === 'done' || task.status === 'success'
-                        ? 'bg-green-500/10'
-                        : task.status === 'failed'
-                        ? 'bg-red-500/10'
-                        : 'bg-yellow-500/10'
-                    }`}>
-                      <Clock className={`size-4 ${
-                        task.status === 'done' || task.status === 'success'
-                          ? 'text-green-500'
-                          : task.status === 'failed'
-                          ? 'text-red-500'
-                          : 'text-yellow-500'
-                      }`} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {task.title || task.input.substring(0, 40) + (task.input.length > 40 ? '...' : '')}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatTimestamp(task.updated_at)}
-                      </p>
-                    </div>
-                    {getStatusBadge(task.status)}
-                    <ChevronRight className="size-4 text-muted-foreground shrink-0" />
-                  </button>
-                  {index < recentTasks.length - 1 && <Separator className="my-3" />}
-                </div>
-              ))
+function ToolkitCard({ app, isConnected, isFeatured, handleConnect, handleDisconnect, connectingToolkit, toolkitsLoading }: any) {
+  return (
+    <div 
+      className={`group relative p-6 rounded-[2.25rem] border-2 border-border/50 bg-card hover:bg-muted/30 transition-all duration-300 shadow-none border-dashed ${isConnected ? 'border-primary/40 ring-2 ring-primary/5 bg-primary/[0.01] border-solid' : ''}`}
+    >
+        <div className="flex items-start gap-5">
+          <div className={`relative size-16 rounded-[1.25rem] flex items-center justify-center shrink-0 overflow-hidden border-2 border-border/30 shadow-inner ${!app.logo ? 'bg-secondary/50' : 'bg-white'}`}>
+            {app.logo ? (
+              <img src={app.logo} alt={app.name} className="size-10 object-contain p-1" />
             ) : (
-              <p className="text-sm text-muted-foreground text-center py-4">No recent activity</p>
+              <Layers className="size-8 text-muted-foreground/30" />
+            )}
+            {isConnected && (
+              <div className="absolute inset-0 bg-green-500/15 flex items-center justify-center backdrop-blur-[1px]">
+                <div className="size-7 bg-green-500 rounded-full border-2 border-white flex items-center justify-center shadow-lg transform scale-110">
+                   <Check className="size-4 text-white stroke-[3]" />
+                </div>
+              </div>
             )}
           </div>
-        </Card>
-      </div>
-
-      <Button
-        variant="outline"
-        className="w-full rounded-xl flex items-center gap-2 justify-center text-destructive hover:bg-destructive/10"
-        onClick={handleSignOut}
-      >
-        <LogOut className="size-4" />
-        Sign Out
-      </Button>
+          
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-3 mb-2 pt-1">
+              <h3 className="text-lg font-black truncate leading-none text-foreground">{app.name}</h3>
+              {isFeatured && (
+                <Badge variant="outline" className="text-[10px] py-0 px-2 font-black border-amber-500/20 text-amber-600 bg-amber-500/5 uppercase tracking-tighter h-5">
+                  Featured
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground line-clamp-2 h-9 leading-relaxed font-medium">
+              {app.description || `Integrate ${app.name} to expand your agent's technical capabilities.`}
+            </p>
+            
+            <div className="flex items-center justify-between mt-6">
+              <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-black bg-muted/80 px-2.5 py-1 rounded-xl border border-border/30">
+                {app.category || 'Module'}
+              </span>
+              
+              <div className="flex gap-2">
+                {isConnected && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-[10px] h-8 px-3 text-muted-foreground/60 hover:text-destructive hover:bg-destructive/5 rounded-xl font-bold lowercase tracking-normal"
+                    onClick={() => handleDisconnect(app.slug)}
+                    disabled={connectingToolkit === app.slug || toolkitsLoading}
+                  >
+                    Disconnect
+                  </Button>
+                )}
+                <div className="flex items-center">
+                  {!isConnected ? (
+                    <Button
+                      size="sm"
+                      className="text-[11px] h-9 px-5 rounded-2xl font-black bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/10 transition-all flex items-center gap-2"
+                      onClick={() => handleConnect(app.slug)}
+                      disabled={connectingToolkit === app.slug || toolkitsLoading}
+                    >
+                      {connectingToolkit === app.slug ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <>
+                          Link
+                          <ArrowRight className="size-4" />
+                        </>
+                      )}
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-1.5 px-4 py-1.5 rounded-2xl bg-green-500/10 border border-green-500/20 text-green-600">
+                      <Check className="size-3.5 stroke-[3]" />
+                      <span className="text-[11px] font-black uppercase tracking-wider">Connected</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
     </div>
+  );
+}
+
+function StatCard({ value, label }: { value: string | number, label: string }) {
+  return (
+    <Card className="p-6 rounded-[2rem] border-2 border-border/50 bg-card text-center hover:border-primary/20 transition-all group shadow-sm border-dashed">
+      <p className="text-4xl font-black group-hover:text-primary transition-colors tracking-tighter text-foreground">{value}</p>
+      <p className="text-[11px] text-muted-foreground uppercase tracking-[0.2em] font-black mt-2 opacity-60 group-hover:opacity-100 transition-opacity">{label}</p>
+    </Card>
   );
 }

@@ -1,15 +1,9 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { getComposioConnectionStatus } from '@/lib/composio';
+import { getToolRouter } from '@/lib/composio/index';
 import { getOrCreateClerkUser } from '@/lib/database';
 
 export async function GET() {
-  const defaultResponse = { 
-    connected: [], 
-    available: ['gmail', 'github', 'slack', 'googlecalendar', 'twitter', 'notion'],
-    error: 'Composio not configured'
-  };
-
   try {
     const { userId: clerkUserId } = await auth();
     
@@ -18,17 +12,41 @@ export async function GET() {
     }
 
     const internalUser = await getOrCreateClerkUser(clerkUserId);
+    const router = getToolRouter();
     
-    try {
-      const { connected, available } = await getComposioConnectionStatus(internalUser.id);
-      return NextResponse.json({ connected, available });
-    } catch (sdkError) {
-      console.error('[API] Composio SDK error:', sdkError);
-      return NextResponse.json(defaultResponse);
-    }
+    // Create or get session for the user
+    const session = await router.getOrCreateSession("osap-main", internalUser.id);
+    
+    // Fetch both global toolkits and session toolkits with individual error handling
+    const [globalToolkits, sessionToolkits] = await Promise.all([
+      router.listToolkitsFallback(session.id).catch(err => {
+        console.error('[API] Global toolkit fetch failed:', err);
+        return [];
+      }),
+      router.listToolkits(session.id).catch(err => {
+        console.error('[API] Session toolkit fetch failed:', err);
+        return [];
+      })
+    ]);
+    
+    // Merge them together, prioritizing session toolkits for connection details
+    const toolkitMap = new Map<string, any>();
+    globalToolkits.forEach(t => toolkitMap.set(t.slug, t));
+    sessionToolkits.forEach(t => toolkitMap.set(t.slug, { ...toolkitMap.get(t.slug), ...t }));
+    
+    const toolkits = Array.from(toolkitMap.values());
+    const connected = toolkits.filter((t: any) => t.connection?.is_active).map((t: any) => t.slug);
+    
+    return NextResponse.json({ 
+      connected, 
+      toolkits 
+    });
   } catch (error) {
     console.error('[API] Composio status error:', error);
-    // Even on auth/internal user error, return 200 with default to avoid crashing UI
-    return NextResponse.json(defaultResponse);
+    return NextResponse.json({ 
+      connected: [], 
+      toolkits: [],
+      error: 'Failed to fetch toolkit status' 
+    }, { status: 200 }); // Return 200 to avoid crashing UI
   }
 }

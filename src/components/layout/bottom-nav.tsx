@@ -8,7 +8,8 @@ import {
   ListTodo,
   Brain,
   Code2,
-  User
+  User,
+  MessageSquare,
 } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
 import {
@@ -19,9 +20,9 @@ import {
 
 const navItems = [
   {
-    label: 'Home',
-    href: '/home',
-    icon: Home,
+    label: 'Chat',
+    href: '/chat',
+    icon: MessageSquare,
   },
   {
     label: 'Tasks',

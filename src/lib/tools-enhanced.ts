@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { ToolDefinition, ToolExecution } from '@/types/database';
 import { getToolCategory, isComposioToolName, type CapabilityPolicy, type ToolCategory } from './tool-categories';
-import { searchTools, executeComposioToolCall, createComposioMetaTools } from './composio';
+import { searchTools, executeComposioToolCall, createComposioMetaTools } from './composio/index';
 
 export interface ToolResult {
   success: boolean;
@@ -251,10 +251,11 @@ export async function executeTool(
       const result = await executeComposioToolCall(userId, { name: toolName, parameters: input });
       return {
         ...result,
+        error: result.error?.message,
         executionId: `${toolName}-${Date.now()}`,
         durationMs: Date.now() - startTime,
         toolName,
-        category: 'composio',
+        category: 'composio' as any,
       };
     }
     
@@ -317,7 +318,7 @@ async function executeMetaTool(
     }
     
     const { query, limit = 20 } = input as { query: string; limit?: number };
-    const results = await searchTools(query, limit);
+    const results = await searchTools(query, limit, userId);
     
     return {
       success: true,
@@ -349,6 +350,7 @@ async function executeMetaTool(
     
     return {
       ...result,
+      error: result.error?.message,
       durationMs: Date.now() - startTime,
       toolName,
     };

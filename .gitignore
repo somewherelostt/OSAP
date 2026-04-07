@@ -56,6 +56,8 @@ test-*.ts
 
 # Codebase analysis
 CODEBASE_ANALYSIS.txt
+osap.txt
+bun.lock
 
 # Deploy scripts
 deploy.sh

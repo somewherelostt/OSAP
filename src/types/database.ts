@@ -1,6 +1,7 @@
 // Database types
 export interface DbUser {
   id: string;
+  clerk_id?: string;
   email: string;
   name?: string;
   avatar_url?: string;

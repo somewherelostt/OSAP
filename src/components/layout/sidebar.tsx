@@ -11,6 +11,7 @@ import {
   User,
   Settings,
   Bot,
+  MessageSquare,
 } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
 import {
@@ -23,9 +24,9 @@ import { Separator } from '@/components/ui/separator';
 
 const navItems = [
   {
-    label: 'Home',
-    href: '/home',
-    icon: Home,
+    label: 'Chat',
+    href: '/chat',
+    icon: MessageSquare,
   },
   {
     label: 'Tasks',
@@ -75,19 +76,21 @@ export function Sidebar() {
 
             return (
               <Tooltip key={item.href}>
-                <TooltipTrigger>
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      buttonVariants({ variant: 'ghost', size: 'icon' }),
-                      'size-12 rounded-xl transition-all duration-200 flex items-center justify-center',
-                      isActive
-                        ? 'bg-primary/10 text-primary hover:bg-primary/15'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                    )}
-                  >
-                    <Icon className="size-5" />
-                  </Link>
+                <TooltipTrigger
+                  render={
+                    <Link
+                      href={item.href}
+                      className={cn(
+                        buttonVariants({ variant: 'ghost', size: 'icon' }),
+                        'size-12 rounded-xl transition-all duration-200 flex items-center justify-center',
+                        isActive
+                          ? 'bg-primary/10 text-primary hover:bg-primary/15'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                      )}
+                    />
+                  }
+                >
+                  <Icon className="size-5" />
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={12}>
                   <p className="text-sm font-medium">{item.label}</p>
@@ -99,16 +102,18 @@ export function Sidebar() {
 
         <div className="flex flex-col items-center py-6 gap-2 border-t border-border/50">
           <Tooltip>
-            <TooltipTrigger>
-              <Link
-                href="/profile"
-                className={cn(
-                  buttonVariants({ variant: 'ghost', size: 'icon' }),
-                  'size-12 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent flex items-center justify-center'
-                )}
-              >
-                <Settings className="size-5" />
-              </Link>
+            <TooltipTrigger
+              render={
+                <Link
+                  href="/profile"
+                  className={cn(
+                    buttonVariants({ variant: 'ghost', size: 'icon' }),
+                    'size-12 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent flex items-center justify-center'
+                  )}
+                />
+              }
+            >
+              <Settings className="size-5" />
             </TooltipTrigger>
             <TooltipContent side="right" sideOffset={12}>
               <p className="text-sm font-medium">Settings</p>

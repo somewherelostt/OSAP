@@ -28,8 +28,16 @@ export async function getUser(userId: string): Promise<DbUser | null> {
     .eq('id', userId)
     .single();
   
-  if (error) throw error;
+  if (error) return null;
   return data;
+}
+
+/**
+ * Quick helper to get Clerk ID from internal UUID
+ */
+export async function getClerkIdByInternalId(internalId: string): Promise<string | null> {
+  const user = await getUser(internalId);
+  return user?.clerk_id || null;
 }
 
 export async function getOrCreateUser(email: string): Promise<DbUser> {
@@ -125,18 +133,27 @@ export async function getOrCreateClerkUser(clerkUserId: string, email?: string):
     .single();
   
   if (insertError) {
-    // If insert fails (e.g. RLS), try upsert
+    // If insert fails (e.g. duplicate key from race condition), try upserting with onConflict
     const { data: upserted, error: upsertError } = await getSupabase()
       .from('users')
       .upsert(
         { clerk_id: clerkUserId, email: userEmail },
-        { ignoreDuplicates: true }
+        { onConflict: 'clerk_id' }
       )
       .select()
       .single();
     
     if (upsertError) {
-      console.error('[DB] Error creating Clerk user:', upsertError);
+      console.error('[DB] Error creating Clerk user via upsert:', upsertError);
+      
+      // Ultimate fallback for aggressive race conditions
+      const { data: fallbackUser } = await getSupabase()
+        .from('users')
+        .select('*')
+        .eq('clerk_id', clerkUserId)
+        .single();
+        
+      if (fallbackUser) return fallbackUser;
       throw upsertError;
     }
     return upserted;

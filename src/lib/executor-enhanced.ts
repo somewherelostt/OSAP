@@ -26,20 +26,30 @@ import {
   recallKnowledge,
   isHydraConfigured,
 } from './hydra';
-import { executeComposioToolCall } from './composio';
+import { executeComposioToolCall, searchTools } from './composio/index';
 
 initializeTools();
 
 export function formatStepResult(tool: string, result: any): string {
   if (!result) return 'Completed';
   
+  const toolUpper = tool.toUpperCase();
   const data = (result && typeof result === 'object' && 'data' in result && result.data) 
     ? result.data 
     : result;
 
-  if (tool.includes('GMAIL_FETCH') || tool.includes('GMAIL_LIST')) {
+  const toolLower = tool.toLowerCase();
+  if (toolLower.includes('gmail_fetch') || toolLower.includes('gmail_list')) {
     const messages = data.messages || (Array.isArray(data) ? data : []);
     if (messages.length === 0) return 'No emails found.';
+    
+    // Check if we actually have subject/from data or just IDs
+    const hasDetails = messages.some((m: any) => m.from || m.sender || m.subject);
+    
+    if (!hasDetails) {
+      return `Found ${messages.length} email(s) (IDs only). Still need to fetch full details for these messages.`;
+    }
+
     let summary = `Found ${messages.length} email${messages.length > 1 ? 's' : ''}:\n`;
     messages.forEach((msg: any, i: number) => {
       const from = msg.sender || msg.from || 'Unknown';
@@ -50,29 +60,30 @@ export function formatStepResult(tool: string, result: any): string {
     return summary.trim();
   }
 
-  if (tool.includes('GMAIL_SEND') || tool.includes('GMAIL_CREATE_EMAIL_DRAFT')) {
+  if (toolUpper.includes('GMAIL_SEND') || toolUpper.includes('GMAIL_CREATE_EMAIL_DRAFT')) {
     const id = data.id || data.messageId || 'Unknown';
     const labels = data.labelIds ? data.labelIds.join(', ') : 'SENT';
     return `✓ Email sent successfully\nMessage ID: ${id}\nLabels: ${labels}`;
   }
 
-  if (tool.includes('GMAIL_GET_EMAIL_BY_ID')) {
+  if (toolUpper.includes('GMAIL_GET_EMAIL_BY_ID') || toolUpper.includes('GMAIL_GET_MESSAGE')) {
     const subject = data.subject || '(No Subject)';
     const from = data.sender || data.from || 'Unknown';
-    const body = data.messageText || data.snippet || '';
+    const body = data.messageText || data.snippet || data.body || '';
     return `Subject: ${subject}\nFrom: ${from}\n---\n${body.substring(0, 200)}${body.length > 200 ? '...' : ''}`;
   }
 
-  if (tool === 'github_create_issue' || tool.includes('GITHUB_CREATE_ISSUE')) {
+  if (toolUpper === 'GITHUB_CREATE_ISSUE' || toolUpper.includes('GITHUB_CREATE_ISSUE')) {
     const number = data.number || data.id;
     const url = data.html_url || data.url;
-    return `✓ Issue #${number} created: ${data.title} — ${url}`;
+    const title = data.title || 'Untitled';
+    return `✓ Issue #${number} created: ${title} — ${url}`;
   }
 
-  if (tool === 'github_get_issues' || tool.includes('GITHUB_LIST_ISSUES')) {
+  if (toolUpper === 'GITHUB_GET_ISSUES' || toolUpper.includes('GITHUB_LIST_ISSUES')) {
     const issues = Array.isArray(data) ? data : data.issues || [];
     if (issues.length === 0) return 'No issues found.';
-    let summary = `Found ${issues.length} issues:\n`;
+    let summary = `Found ${issues.length} issue${issues.length > 1 ? 's' : ''}:\n`;
     issues.forEach((issue: any, i: number) => {
       summary += `${i + 1}. #${issue.number} ${issue.title} [${issue.state}]\n`;
     });
@@ -93,13 +104,13 @@ export function formatStepResult(tool: string, result: any): string {
     return 'No memories found';
   }
 
-  if (tool === 'http_request' || tool === 'HTTP_REQUEST') {
+  if (toolUpper === 'HTTP_REQUEST') {
     const body = data?.data || data?.body || data?.response || data;
     const status = data?.status || data?.statusCode;
 
     // Check for GitHub auth error
     if (status === 401 || body?.message?.includes('authentication') || body?.message?.includes('Requires authentication')) {
-      return '⚠️ **GitHub not connected**\n\nPlease connect your GitHub account in **Profile → Connected Apps** to enable this feature.';
+      return '⚠️ **GitHub not connected**\n\nPlease connect your GitHub account to enable this feature.';
     }
 
     if (status === 403 || body?.message?.includes('Forbidden')) {
@@ -127,8 +138,30 @@ export function formatStepResult(tool: string, result: any): string {
     return 'Request completed successfully';
   }
 
+  if (tool === 'composio_search_tools') {
+    const tools = data.tools || (Array.isArray(data) ? data : []);
+    if (tools.length === 0) return 'No matching tools found.';
+    let summary = `Found ${tools.length} tool${tools.length > 1 ? 's' : ''} for "${data.query || 'your query'}":\n\n`;
+    tools.forEach((t: any) => {
+      summary += `• **${t.name}**: ${t.description}\n`;
+    });
+    return summary.trim();
+  }
+
   if (typeof data === 'object' && data !== null) {
-    return 'Completed successfully';
+    try {
+      // For Composio/Generic tools, if it's an object with messages, return a simple count/summary
+      if (data.messages && Array.isArray(data.messages)) {
+        return `Found ${data.messages.length} item(s). Use specific fetch tools to see details if needed.`;
+      }
+      if (data.items && Array.isArray(data.items)) {
+        return `Found ${data.items.length} item(s).`;
+      }
+      if (Object.keys(data).length === 0) return 'Completed successfully (empty result)';
+      return JSON.stringify(data, null, 2).slice(0, 800);
+    } catch (e) {
+      return 'Completed successfully';
+    }
   }
   return String(data);
 }
@@ -210,12 +243,18 @@ export async function createAndExecuteTask(
   input: string,
   internalUserId: string
 ): Promise<ExecuteTaskOutput> {
-  console.log('[Executor] Starting task:', input, 'for user:', internalUserId);
-  
   const title = input.substring(0, 100) + (input.length > 100 ? '...' : '');
+  const task = await createTask(internalUserId, input, title);
+  return executeTask(task);
+}
 
+export async function executeTask(
+  task: DbTask
+): Promise<ExecuteTaskOutput> {
+  const { input, user_id: internalUserId } = task;
+  console.log('[Executor] Executing task:', input, 'for user:', internalUserId);
+  
   try {
-    const task = await createTask(internalUserId, input, title);
     await updateTask(task.id, { status: 'running' });
 
     let memoryContext = '';
@@ -233,101 +272,188 @@ export async function createAndExecuteTask(
 
     console.log('[Executor] Memory context length:', memoryContext.length);
 
-    const planResult = await generatePlan(input, memoryContext);
-    
-    if ('error' in planResult) {
-      await updateTask(task.id, { status: 'failed', error: planResult.error });
-      return { taskId: task.id, status: 'failed', error: planResult.error };
-    }
-    
-    const plan = planResult.plan;
-    console.log('[Executor] GLM plan:', JSON.stringify(plan, null, 2));
-    
-    await updateTask(task.id, { plan, status: 'running' });
+    // Resolve Clerk ID for Composio binding
+    const { getClerkIdByInternalId } = await import('./database');
+    const clerkUserId = (await getClerkIdByInternalId(internalUserId)) || internalUserId;
+    console.log(`[Executor] Using clerkUserId: ${clerkUserId} for Composio tools`);
 
-    const stepResults = [];
+    const BUILT_IN_TOOLS = ['memory_store', 'memory_recall', 'http_request', 'github_create_issue', 'github_get_issues', 'email_send', 'twitter_post'];
+
+    const MAX_ITERATIONS = 4;
+    let iterations = 0;
+    let executionHistory: any[] = [];
+    let stepResults: any[] = [];
     let hasFailure = false;
-    const BUILT_IN_TOOLS = ['memory_store', 'memory_recall', 'http_request', 'github_create_issue', 'github_get_issues', 'email_send', 'twitter_post', 'composio_search_tools', 'composio_execute_tool'];
+    let finalAnswer = '';
+    let finalPlan: any = null;
 
-    // BUILT_IN_TOOLS list remains in function scope if needed or moved up.
-    // We already moved the functions up.
+    while (iterations < MAX_ITERATIONS) {
+      iterations++;
+      console.log(`[Executor] Loop iteration ${iterations}/${MAX_ITERATIONS}`);
 
-    for (const step of plan.steps) {
-      const stepRecord = await createTaskStep(task.id, {
-        step_order: step.order,
-        tool_name: step.tool,
-        tool_input: step.input || {},
-        status: 'pending',
-      });
-
-      try {
-        await updateTaskStep(stepRecord.id, { status: 'running' });
-        
-        let result: ToolResult;
-        
-        if (BUILT_IN_TOOLS.includes(step.tool)) {
-          result = await executeTool(step.tool, step.input || {}, internalUserId, DEFAULT_POLICY);
+      const planResult = await generatePlan(input, memoryContext, executionHistory);
+      
+      if ('error' in planResult) {
+        if (iterations === 1) {
+          await updateTask(task.id, { status: 'failed', error: planResult.error });
+          return { taskId: task.id, status: 'failed', error: planResult.error };
         } else {
-          const composioResult = await executeComposioToolCall(internalUserId, {
-            name: step.tool,
-            parameters: step.input || {},
-          });
-          result = {
-            success: composioResult.success,
-            data: composioResult.data,
-            error: composioResult.error,
-          };
+          console.warn('[Executor] LLM Planner failed mid-loop. Breaking out of loop.');
+          break;
         }
-        
-        if (result.success) {
-          const formatted = formatStepResult(step.tool, result.data);
-          await updateTaskStep(stepRecord.id, { 
-            status: 'success', 
-            tool_output: result.data,
-            // Note: We don't have a column for formatted, so we'll store it in the JSON if needed,
-            // but for now we'll just use it in the in-memory results array
-          });
-          stepResults.push({ step, result: result.data, formatted, status: 'success' });
-        } else {
-          await updateTaskStep(stepRecord.id, { 
-            status: 'failed', 
-            error: result.error,
-          });
-          stepResults.push({ step, error: result.error, status: 'failed' });
+      }
+      
+      const plan = planResult.plan;
+      finalPlan = plan;
+      
+      if (plan.steps.length === 0 && plan.answer) {
+        finalAnswer = plan.answer;
+        console.log('[Executor] Agent concluded with direct answer.');
+        break;
+      }
+
+      await updateTask(task.id, { plan, status: 'running' });
+
+      let loopHadFailure = false;
+
+      for (const step of plan.steps) {
+        const stepRecord = await createTaskStep(task.id, {
+          step_order: step.order,
+          tool_name: step.tool,
+          tool_input: step.input || {},
+          status: 'pending',
+        });
+
+        try {
+          await updateTaskStep(stepRecord.id, { status: 'running' });
+          
+          let result: ToolResult;
+          
+          if (BUILT_IN_TOOLS.includes(step.tool)) {
+            result = await executeTool(step.tool, step.input || {}, internalUserId, DEFAULT_POLICY);
+          } else {
+            // Attempt Composio call
+            let composioResult = await executeComposioToolCall(clerkUserId, {
+              name: step.tool,
+              parameters: step.input || {},
+            });
+
+            // Retry logic
+            const errorMsg = composioResult.error?.message || "";
+            const errorCode = String((composioResult as any).error?.code || "");
+            
+            if (!composioResult.success && 
+                !(composioResult as any).authRequired && 
+                (errorCode === '4301' || 
+                 errorMsg.includes('4301') ||
+                 errorMsg.includes('not found') ||
+                 errorMsg.includes('Bad Request') || 
+                 errorMsg.includes('400')
+                )) {
+              console.log(`[Executor] Tool failed (${step.tool}), attempting semantic search fallback...`);
+              const searchResults = await searchTools(step.tool.replace(/_/g, ' '), 5, clerkUserId);
+              if (searchResults && searchResults.tools && searchResults.tools.length > 0) {
+                const bestMatch = searchResults.tools[0].name;
+                console.log(`[Executor] Found better match: ${bestMatch}. Retrying...`);
+                composioResult = await executeComposioToolCall(clerkUserId, {
+                  name: bestMatch,
+                  parameters: step.input || {},
+                });
+                step.tool = bestMatch;
+              }
+            }
+
+            // Check auth
+            if ((composioResult as any).authRequired) {
+              console.log(`[Executor] Authentication required for ${step.tool}. Halting.`);
+              const authInfo = composioResult as any;
+              
+              const authResult = {
+                type: 'REQUIRES_AUTH',
+                toolkit: authInfo.toolkit,
+                authUrl: authInfo.authUrl,
+                message: `I need permission to access ${authInfo.toolkit.toUpperCase()}. Please click the link to connect your account.`,
+                taskId: task.id
+              };
+
+              await updateTask(task.id, { 
+                status: 'failed', 
+                result: authResult,
+                error: `Authentication required for ${authInfo.toolkit}`
+              });
+
+              await updateTaskStep(stepRecord.id, { status: 'failed', error: 'Authentication required' });
+
+              return {
+                taskId: task.id,
+                status: 'failed',
+                plan,
+                error: 'Authentication required'
+              };
+            }
+
+            result = {
+              success: (composioResult as any).success,
+              data: (composioResult as any).data,
+              error: (composioResult as any).error?.message || (composioResult as any).error,
+            };
+          }
+          
+          if (result.success) {
+            const formatted = formatStepResult(step.tool, result.data);
+            await updateTaskStep(stepRecord.id, { status: 'success', tool_output: result.data });
+            stepResults.push({ step, result: result.data, formatted, status: 'success', iteration: iterations });
+            executionHistory.push({ tool: step.tool, result: formatted });
+          } else {
+            await updateTaskStep(stepRecord.id, { status: 'failed', error: result.error });
+            stepResults.push({ step, error: result.error, status: 'failed', iteration: iterations });
+            executionHistory.push({ tool: step.tool, error: result.error });
+            hasFailure = true;
+            loopHadFailure = true;
+          }
+        } catch (stepError) {
+          const errorMsg = stepError instanceof Error ? stepError.message : String(stepError);
+          await updateTaskStep(stepRecord.id, { status: 'failed', error: errorMsg });
+          stepResults.push({ step, error: errorMsg, status: 'failed', iteration: iterations });
+          executionHistory.push({ tool: step.tool, error: errorMsg });
           hasFailure = true;
+          loopHadFailure = true;
         }
-      } catch (stepError) {
-        const errorMsg = stepError instanceof Error ? stepError.message : String(stepError);
-        await updateTaskStep(stepRecord.id, { status: 'failed', error: errorMsg });
-        stepResults.push({ step, error: errorMsg, status: 'failed' });
-        hasFailure = true;
+      }
+      
+      // If we failed all steps in this loop, break to avoid spinning endlessly
+      if (loopHadFailure && plan.steps.length > 0 && stepResults.filter(s => s.iteration === iterations && s.status === 'success').length === 0) {
+        console.warn(`[Executor] All steps failed in loop iteration ${iterations}. Breaking loop.`);
+        break;
       }
     }
 
     console.log('[Executor] Step results:', JSON.stringify(stepResults, null, 2));
 
-    // Build final result with answer and summary
-    // Filter out memory steps - we want DATA steps for the answer
-    const dataSteps = stepResults.filter(s =>
+    let dataSteps = stepResults.filter(s =>
       s.status === 'success' &&
       s.step.tool !== 'memory_store' &&
       s.step.tool !== 'memory_recall'
     );
 
-    const memorySteps = stepResults.filter(s => s.step.tool === 'memory_store');
-
-    let finalAnswer = '';
-
-    // Build the answer from DATA steps (last one wins for multi-step)
-    if (dataSteps.length > 0) {
-      finalAnswer = dataSteps.map(s => s.formatted || normalizeStepResult(s.result)).join('\n\n');
-    } else if (plan.answer) {
-      finalAnswer = plan.answer;
+    if (dataSteps.some(s => s.step.tool !== 'composio_search_tools')) {
+      dataSteps = dataSteps.filter(s => s.step.tool !== 'composio_search_tools');
     }
 
-    // Get formatted answer from last DATA step (not memory step)
-    const lastDataStep = dataSteps.length > 0 ? dataSteps[dataSteps.length - 1] : null;
-    const formattedAnswer = lastDataStep?.formatted || finalAnswer;
+    if (finalAnswer === '' && dataSteps.length > 0) {
+      // Group by the latest loop iteration to get all final results
+      const maxIteration = Math.max(...dataSteps.map(s => s.iteration));
+      const latestSteps = dataSteps.filter(s => s.iteration === maxIteration);
+      
+      finalAnswer = latestSteps
+        .map(s => s.formatted || normalizeStepResult(s.result))
+        .join('\n\n---\n\n');
+    } else if (finalAnswer === '' && finalPlan?.answer) {
+      finalAnswer = finalPlan.answer;
+    }
+
+    const formattedAnswer = finalAnswer;
+
 
     const finalResult = {
       answer: finalAnswer,
@@ -340,10 +466,9 @@ export async function createAndExecuteTask(
 
     console.log('[Executor] Final result:', JSON.stringify(finalResult, null, 2));
 
-    const finalStatus = hasFailure ? 'failed' : 'success';
+    const finalStatus = (hasFailure && stepResults.length === 0) ? 'failed' : 'success';
     await updateTask(task.id, { status: finalStatus, result: finalResult });
 
-    // Step 6: Store in memory — try HydraDB first, fall back to Supabase
     const memoryText = summarizeForMemory(input, finalResult.answer || finalResult);
 
     try {
@@ -351,7 +476,6 @@ export async function createAndExecuteTask(
       console.log('[Executor] Memory stored in HydraDB');
     } catch (hydraError) {
       console.warn('[Executor] HydraDB storage failed, falling back to Supabase:', hydraError);
-      // Fallback: store in Supabase memory_nodes table directly
       try {
         await createMemoryNode({
           user_id: internalUserId,
@@ -362,20 +486,17 @@ export async function createAndExecuteTask(
           importance: 0.7,
         });
         console.log('[Executor] Memory stored in Supabase fallback');
-      } catch (supabaseError) {
-        console.error('[Executor] Both memory storage methods failed:', supabaseError);
-      }
+      } catch (supabaseError) { }
     }
 
     return { 
       taskId: task.id, 
       status: finalStatus, 
-      plan, 
+      plan: finalPlan, 
       memoryUsed,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    const task = await createTask(internalUserId, input, title);
     await updateTask(task.id, { status: 'failed', error: errorMsg });
     return { taskId: task.id, status: 'failed', error: errorMsg };
   }

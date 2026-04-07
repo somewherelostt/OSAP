@@ -26,11 +26,11 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     
     if (!error) {
-      return NextResponse.redirect(`${origin}/home`);
+      return NextResponse.redirect(`${origin}/chat`);
     }
     
     console.error('[Auth] Session exchange error:', error);
   }
 
-  return NextResponse.redirect(`${origin}/?error=auth_failed`);
+  return NextResponse.redirect(`${origin}/chat?error=auth_failed`);
 }

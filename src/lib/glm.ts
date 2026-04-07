@@ -50,7 +50,8 @@ export interface GLMError {
 
 export async function generatePlan(
   input: string,
-  memoryContext: string = ''
+  memoryContext: string = '',
+  executionHistory: any[] = []
 ): Promise<{ plan: TaskPlan; reasoning: string } | { error: string }> {
   if (!GLM_API_KEY) {
     return { error: 'GLM_API_KEY not configured' };
@@ -81,41 +82,37 @@ Built-in tools (use these directly, no auth needed):
 
 IMPORTANT: For GitHub, Gmail, Slack, Twitter, Calendar — ALWAYS use Composio tools below. NEVER use raw HTTP requests for authenticated APIs.
 
-Composio tools (requires user to connect the app in Profile → Connected Apps):
-GITHUB:
-- GITHUB_GET_REPOS: { max_results?: number } — Get authenticated user's repositories (sorted by updated)
-- GITHUB_CREATE_AN_ISSUE: { owner: string, repo: string, title: string, body?: string } — Create an issue
-- GITHUB_LIST_ISSUES: { owner: string, repo: string, state?: string } — List issues
-- GITHUB_CREATE_REPO: { name: string, description?: string, private?: boolean } — Create a repository
+Composio Tools (Access to 250+ Apps: Gmail, GitHub, Slack, Discord, Twitter, Google Calendar, Notion, etc.):
+- Canonical Naming: Composio slugs are usually APP_ACTION (e.g., github_create_issue, gmail_send_message, gmail_get_message). Prefer lowercase.
+- Fallback: If you must guess, use lowercase APP_ACTION format.
 
-GMAIL:
-- GMAIL_FETCH_EMAILS: { max_results: number, query?: string } — Fetch emails
-- GMAIL_SEND_EMAIL: { to: string, subject: string, body: string } — Send email
-- GITHUB_GET_EMAIL_BY_ID: { message_id: string } — Get specific email
+ITERATIVE EXECUTION (AGENTIC LOOP):
+You are running in a loop. You will be provided with the results of your previous tool executions for this task.
+- If a previous step fetched IDs but not details (e.g. gmail_list_messages returned IDs but you need the email body), you MUST output follow-up steps using the relevant _GET_ tool (e.g. gmail_get_message) using those IDs.
+- If the goal is fully met based on the execution history, output an "answer" and NO "steps".
+- If the goal is NOT met, output the next logical "steps" to proceed.
+- Do NOT repeat failed steps with the exact same inputs. Think carefully and adjust the tool slug or input parameters.
 
-SLACK:
-- SLACK_SEND_MESSAGE: { channel: string, text: string } — Send Slack message
+Always use "tool" field for tool names and "input" field for parameters.
+Use "description" for a human-readable, brief explanation of what the step is doing (e.g., "Fetching recent emails", "Retrieving message content"). Do NOT just say "Executing tool_name...".
 
-TWITTER:
-- TWITTER_CREATE_TWEET: { text: string } — Post a tweet
-
-GOOGLECALENDAR:
-- GOOGLECALENDAR_LIST_EVENTS: { max_results?: number } — List calendar events
-- GOOGLECALENDAR_CREATE_EVENT: { summary: string, start: string, end: string } — Create event
-
-For simple questions — answer directly in the "answer" field with no steps.`;
+For simple questions, or if the task is thoroughly completed based on tool history — answer directly in the "answer" field with an empty steps array.`;
 
   const userInput = input;
   const userContext = '';
   const memorySection = memoryContext
     ? `\n\nRelevant memories from past interactions:\n${memoryContext}`
     : '';
+    
+  const historySection = executionHistory && executionHistory.length > 0
+    ? `\n\nPREVIOUS ACTIONS TAKEN IN THIS LOOP:\n${JSON.stringify(executionHistory, null, 2)}\n\nReview the above results. If the final goal is met, provide 'answer' and [] steps. If you need more details from the IDs, provide the follow-up step.`
+    : '';
 
   const messages: GLMMessage[] = [
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
-      content: `Break down this request into steps:\n\n"${userInput}"${userContext}${memorySection}`,
+      content: `Break down this request into steps:\n\n"${userInput}"${userContext}${memorySection}${historySection}`,
     },
   ];
 
@@ -261,6 +258,57 @@ Intents:
     return {
       error: `Intent analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
     };
+  }
+}
+
+export async function generateSynthesizedResponse(
+  query: string,
+  context: string,
+  userFacts: string = ''
+): Promise<string> {
+  if (!GLM_API_KEY) return 'Synthesis failed: API key missing';
+
+  const systemPrompt = `You are a high-quality, friendly AI agent (OSAP). 
+Your goal is to answer the user's question using the provided context and facts.
+
+RULES:
+1. NEVER show raw memory snippets or "Question: ... Answer: ..." logs.
+2. SYNTHESIZE a natural, human-like response.
+3. PRIORITIZE the "Current User Profile Facts" over old, contradictory memory fragments.
+4. If the context contains your past failures (e.g., "I don't know your name"), IGNORE those failures if the "Current User Profile Facts" give you the answer.
+5. Be concise but warm, like a premium digital assistant.
+6. Use professional markdown formatting if needed for lists, but keep it minimal.`;
+
+  const messages: GLMMessage[] = [
+    { role: 'system', content: systemPrompt },
+    {
+      role: 'user',
+      content: `Current User Profile Facts:\n${userFacts}\n\nRelevant Context/Memories:\n${context}\n\nUser Question: "${query}"`,
+    },
+  ];
+
+  try {
+    const response = await fetch(GLM_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GLM_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'glm-5.1',
+        messages,
+        temperature: 0.3,
+        max_tokens: 1024,
+      }),
+    });
+
+    if (!response.ok) return 'I found some information but had trouble summarizing it.';
+
+    const data: GLMResponse = await response.json();
+    return data.choices[0]?.message?.content || "I'm not sure, I'll need more context.";
+  } catch (error) {
+    console.error('[GLM Synthesis] Error:', error);
+    return 'I encountered an error trying to remember that.';
   }
 }
 
