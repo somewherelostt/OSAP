@@ -209,9 +209,8 @@ export default function ChatPage() {
     // In a real app, we'd call an abort API
   };
 
-  // 4. Render
   return (
-    <div className="flex flex-col h-screen max-h-screen bg-background relative overflow-hidden pb-16 md:pb-0">
+    <div className="flex flex-col h-full bg-background relative overflow-hidden">
       <LoginModal open={isLoginModalOpen} onOpenChange={setIsLoginModalOpen} />
       
       <ChatHeader 

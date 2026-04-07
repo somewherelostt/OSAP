@@ -46,12 +46,12 @@ export function ChatInput({ onSend, onStop, isThinking, disabled }: ChatInputPro
 
   return (
     <TooltipProvider>
-      <div className="border-t border-border/50 bg-background/95 backdrop-blur-md p-4 sticky bottom-0 z-10">
+      <div className="bg-gradient-to-t from-background via-background/90 to-transparent pt-8 pb-4 px-4 sticky bottom-0 z-10">
         <div className="max-w-4xl mx-auto flex flex-col gap-2">
           <div className={cn(
-            "relative group flex flex-col items-end gap-2 p-3 rounded-2xl border transition-all duration-300",
-            "bg-muted/30 hover:bg-muted/50 focus-within:bg-card focus-within:border-primary/40 focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:focus-within:shadow-[0_8px_30px_rgb(0,0,0,0.3)]",
-            "border-border/50"
+            "relative group flex flex-col items-end gap-2 p-3 rounded-[1.5rem] border transition-all duration-500",
+            "bg-card/95 backdrop-blur-2xl shadow-xl hover:shadow-2xl focus-within:shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:focus-within:shadow-[0_8px_40px_rgb(0,0,0,0.4)]",
+            "border-border/60 hover:border-border"
           )}>
             <div className="flex w-full items-start gap-3">
               <Tooltip>

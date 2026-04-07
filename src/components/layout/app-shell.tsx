@@ -22,7 +22,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="hidden md:block">
                 <Sidebar />
               </div>
-              <main className="md:pl-20 min-h-screen pb-20 md:pb-0">
+              <main className={cn(
+                "md:pl-20 transition-all w-full",
+                pathname === '/chat' 
+                  ? "h-[100dvh] overflow-hidden pb-[70px] md:pb-0" 
+                  : "min-h-screen pb-24 md:pb-0"
+              )}>
                 {children}
               </main>
               <div className="block md:hidden fixed bottom-0 left-0 right-0 z-50">
